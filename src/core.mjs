@@ -3,29 +3,21 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { START, END, pointer, templates } from './templates.mjs';
+import { ADAPTERS, AGENTS, targets, executable } from './adapters.mjs';
+export { AGENTS, targets } from './adapters.mjs';
 
-export const VERSION = '0.1.0';
-export const AGENTS = ['codex', 'claude', 'cursor', 'antigravity'];
+export const VERSION = '0.2.0';
 export const exists = p => fs.existsSync(p);
 const read = p => exists(p) ? fs.readFileSync(p, 'utf8') : null;
 const hash = s => crypto.createHash('sha256').update(s).digest('hex');
 
-export function context({ home = os.homedir(), configDir = process.env.AGENT_MEMORY_CONFIG_DIR } = {}) {
-  return { home: path.resolve(home), configDir: path.resolve(configDir || path.join(home, '.config', 'agent-memory')) };
+export function context({ home = os.homedir(), configDir = process.env.AGENT_MEMORY_CONFIG_DIR, env } = {}) {
+  return { home: path.resolve(home), configDir: path.resolve(configDir || path.join(home, '.config', 'agent-memory')), env: env || (path.resolve(home) === os.homedir() ? process.env : {}) };
 }
 
 export function expand(input, home) {
   if (!input || /[\r\n`]/u.test(input)) throw new Error('Choose a folder path without line breaks or backticks.');
   return path.resolve(input === '~' ? home : input.startsWith('~/') || input.startsWith('~\\') ? path.join(home, input.slice(2)) : input);
-}
-
-export function targets(ctx) {
-  return {
-    codex: path.join(process.env.CODEX_HOME && ctx.home === os.homedir() ? process.env.CODEX_HOME : path.join(ctx.home, '.codex'), 'AGENTS.md'),
-    claude: path.join(ctx.home, '.claude', 'CLAUDE.md'),
-    cursor: path.join(ctx.home, '.cursor', 'rules', 'agent-memory.mdc'),
-    antigravity: path.join(ctx.home, '.gemini', 'GEMINI.md'),
-  };
 }
 
 function noLink(p) {
@@ -56,8 +48,11 @@ function load(ctx) {
   let state;
   try { state = JSON.parse(raw); } catch { throw new Error(`Cannot parse ${p}. Restore its backup before continuing.`); }
   if (state.schema !== 1 || !Array.isArray(state.records) || typeof state.memoryDir !== 'string' || !Array.isArray(state.agents)) throw new Error('Unsupported or damaged installation state. No files were changed.');
-  const known = new Set([...Object.values(targets(ctx)), path.join(ctx.home, '.claude', 'settings.json')]);
-  if (state.records.some(r => !known.has(r.path) || !['instruction', 'permission'].includes(r.kind))) throw new Error('Installation state contains an unexpected config path. No files were changed.');
+  if (state.agents.some(a => !AGENTS.includes(a))) throw new Error('Unknown agent in installation state.');
+  const projects = state.projects || [];
+  if (!Array.isArray(projects) || projects.some(p => typeof p !== 'string' || !path.isAbsolute(p) || p === ctx.home || p === path.parse(p).root)) throw new Error('Invalid project path in installation state.');
+  const known = new Set([...Object.values(targets(ctx)), path.join(ctx.home, '.claude', 'settings.json'), ...projects.flatMap(p => [path.join(p, 'AGENTS.md'), path.join(p, '.git', 'info', 'exclude')])]);
+  if (state.records.some(r => !known.has(r.path) || !['instruction', 'permission', 'exclude'].includes(r.kind))) throw new Error('Installation state contains an unexpected config path. No files were changed.');
   return state;
 }
 
@@ -72,11 +67,11 @@ function lock(ctx, fn) {
   try { return fn(); } finally { fs.rmdirSync(p); }
 }
 
-function managed(text) {
-  const a = text.indexOf(START), b = text.indexOf(END);
+function managed(text, startMarker = START, endMarker = END) {
+  const a = text.indexOf(startMarker), b = text.indexOf(endMarker);
   if (a < 0 && b < 0) return null;
-  if (a < 0 || b < a || text.indexOf(START, a + START.length) >= 0 || text.indexOf(END, b + END.length) >= 0) throw new Error('A managed instruction block is damaged or duplicated. Repair it before continuing.');
-  return { start: a, end: b + END.length, content: text.slice(a, b + END.length) };
+  if (a < 0 || b < a || text.indexOf(startMarker, a + startMarker.length) >= 0 || text.indexOf(endMarker, b + endMarker.length) >= 0) throw new Error('A managed instruction block is damaged or duplicated. Repair it before continuing.');
+  return { start: a, end: b + endMarker.length, content: text.slice(a, b + endMarker.length) };
 }
 
 function claudeRule(root) {
@@ -93,7 +88,8 @@ function parseSettings(raw) {
 }
 
 export function detect(ctx) {
-  return AGENTS.filter(a => exists(path.dirname(targets(ctx)[a])) || exists(path.join(ctx.home, { codex: '.codex', claude: '.claude', cursor: '.cursor', antigravity: '.gemini' }[a])));
+  const roots = { codex: '.codex', claude: '.claude', cursor: '.cursor', antigravity: '.gemini', opencode: '.config/opencode', copilot: '.copilot', windsurf: '.codeium/windsurf', cline: '.cline' };
+  return AGENTS.filter(a => exists(path.dirname(targets(ctx)[a])) || exists(path.join(ctx.home, roots[a])) || executable(ADAPTERS[a].command, ctx.env));
 }
 
 export function discoverObsidian(ctx, platform = process.platform) {
@@ -107,7 +103,7 @@ export function planSetup(ctx, options) {
   const previous = load(ctx);
   const root = expand(options.memoryDir || previous?.memoryDir || path.join(ctx.home, 'AgentMemory'), ctx.home);
   const selected = options.agents || previous?.agents || detect(ctx);
-  if (!selected.length) throw new Error('No agents detected. Choose agents with --agents codex,claude,cursor,antigravity.');
+  if (!selected.length) throw new Error(`No agents detected. Choose agents with --agents ${AGENTS.join(',')}.`);
   if (selected.some(a => !AGENTS.includes(a))) throw new Error(`Unknown agent. Choose: ${AGENTS.join(', ')}.`);
   const agents = [...new Set([...(previous?.agents || []), ...selected])];
   if (previous && previous.memoryDir !== root) throw new Error('Memory is already installed in a different folder. Uninstall first to relocate it; your notes will be kept.');
@@ -125,10 +121,10 @@ export function planSetup(ctx, options) {
     const p = path.join(root, rel); noLink(p);
     const before = read(p);
     if (before !== null && !previous && !owned) throw new Error(`This folder already contains ${rel}. Choose a new subfolder to avoid replacing existing notes.`);
-    if (before === null) add(p, null, content, 'knowledge');
+    if (before === null || (rel === 'MEMORY.md' && options.upgradePolicy)) add(p, before, content, 'knowledge');
   }
-  for (const a of agents) {
-    const p = targets(ctx)[a]; noLink(p);
+  for (const { a, p } of [...agents.map(a => ({ a, p: targets(ctx)[a] })), ...(previous?.projects || []).map(project => ({ a: 'project', p: path.join(project, 'AGENTS.md') }))]) {
+    noLink(p);
     const before = read(p), text = before || '', block = managed(text);
     const record = records.find(r => r.path === p);
     if (block && !record) throw new Error(`Found an unmanaged existing Agent Memory block in ${p}. Use the original installer settings or remove that block first.`);
@@ -136,6 +132,7 @@ export function planSetup(ctx, options) {
     if (record && !block) throw new Error(`The managed block is missing in ${p}. Restore it or uninstall before reinstalling.`);
     const header = a === 'cursor' && before === null ? '---\ndescription: Shared Markdown memory for coding agents\nalwaysApply: true\n---\n\n' : '';
     const after = block ? text.slice(0, block.start) + pointer(root) + text.slice(block.end) : text + (text && !text.endsWith('\n\n') ? text.endsWith('\n') ? '\n' : '\n\n' : '') + header + pointer(root) + '\n';
+    if (a === 'windsurf' && after.length > 6000) throw new Error('The Windsurf global rules file would exceed its 6,000-character limit. Use a personal project connection instead.');
     add(p, before, after, 'instruction');
     if (!record) records.push({ path: p, kind: 'instruction', original: before, installed: after });
     else {
@@ -154,7 +151,7 @@ export function planSetup(ctx, options) {
       if (!records.some(r => r.path === p)) records.push({ path: p, kind: 'permission', original: before, installed: after, rule });
     }
   }
-  return { root, agents, changes, state: { schema: 1, version: VERSION, memoryDir: root, notesDir, agents, records } };
+  return { root, agents, changes, state: { ...previous, schema: 1, version: VERSION, memoryDir: root, notesDir, agents, records } };
 }
 
 function apply(ctx, changes, state) {
@@ -216,9 +213,10 @@ export function planUninstall(ctx) {
       if (!Object.keys(d.permissions).length && !original.permissions) delete d.permissions;
       after = JSON.stringify(d, null, 2) + '\n';
     } else {
-      const block = managed(before);
+      const markers = r.kind === 'exclude' ? ['# agent-memory:local:start', '# agent-memory:local:end'] : [];
+      const block = managed(before, ...markers);
       if (!block) continue;
-      if (block.content !== managed(r.installed).content) throw new Error(`The managed block in ${r.path} was edited. Review it before uninstalling; no files were changed.`);
+      if (block.content !== managed(r.installed, ...markers).content) throw new Error(`The managed block in ${r.path} was edited. Review it before uninstalling; no files were changed.`);
       // Remove exactly the managed text; preserve all later user edits.
       after = before.slice(0, block.start) + before.slice(block.end);
     }
@@ -245,9 +243,16 @@ export function doctor(ctx) {
   const add = (ok, label) => checks.push({ status: ok ? 'pass' : 'fail', label });
   for (const rel of ['MEMORY.md', 'INDEX.md', 'templates/lesson.md']) add(Boolean(read(path.join(state.memoryDir, rel))), `Readable ${rel}`);
   try { fs.accessSync(path.join(state.memoryDir, 'inbox'), fs.constants.W_OK); add(true, 'Your OS user can write to inbox/ (agent sandbox access must be checked separately)'); } catch { add(false, 'Inbox is not writable by your OS user'); }
+  const verification = read(path.join(ctx.configDir, 'verification.json'));
+  let verified = {}; try { verified = JSON.parse(verification || '{}'); } catch { /* Report unverified rather than trust damaged results. */ }
+  const connections = [];
   for (const a of state.agents) {
     const r = state.records.find(r => r.path === targets(ctx)[a]);
     try { add(managed(read(r.path) || '')?.content === managed(r.installed).content, `${a}: instruction file configured`); } catch { add(false, `${a}: managed block needs repair`); }
+    const result = verified[a];
+    const current = result?.fingerprint === fingerprint(ctx, a);
+    let configured = false; try { configured = managed(read(r.path) || '')?.content === managed(r.installed).content; } catch { /* Already reported above. */ }
+    connections.push({ agent: a, name: ADAPTERS[a].name, configured, executable: Boolean(executable(ADAPTERS[a].command, ctx.env)), liveSupported: ADAPTERS[a].live, read: current ? result.read : 'unverified', write: current ? result.write : 'unverified', checkedAt: result?.checkedAt || null, evidence: current ? result.evidence : null, stale: Boolean(result && !current) });
   }
   if (state.agents.includes('codex')) {
     const override = path.join(path.dirname(targets(ctx).codex), 'AGENTS.override.md');
@@ -257,10 +262,9 @@ export function doctor(ctx) {
   if (permission) {
     try { add(parseSettings(read(permission.path)).permissions?.allow?.includes(permission.rule), 'Claude scoped inbox capture permission'); } catch { add(false, 'Claude settings need repair'); }
   }
-  if (state.agents.includes('cursor')) checks.push({ status: 'manual', label: 'Cursor: also paste `agent-memory instructions cursor` output into global User Rules; verify in a fresh chat.' });
-  if (state.agents.includes('antigravity')) checks.push({ status: 'manual', label: 'Antigravity: allow read for the memory folder and write for inbox/ when prompted. Keep access scoped.' });
+  for (const a of state.agents) if (ADAPTERS[a].manual) checks.push({ status: 'manual', label: `${ADAPTERS[a].name}: ${ADAPTERS[a].manual}` });
   checks.push({ status: 'manual', label: 'Files configured is not behavior verified. Run agent-memory test in each fresh agent chat.' });
-  return { ok: !checks.some(c => c.status === 'fail'), memoryDir: state.memoryDir, checks };
+  return { ok: !checks.some(c => c.status === 'fail'), memoryDir: state.memoryDir, checks, connections, projects: state.projects || [], retrieval: { pointerCharacters: pointer(state.memoryDir).length, alwaysLoadsNotebook: false, searchOutputCharacters: 4000, initialNotes: 2, searchesBeforeMovingOn: 2 } };
 }
 
 const probePath = ctx => path.join(ctx.configDir, 'probe.json');
@@ -272,15 +276,16 @@ function probe(ctx) {
   return p;
 }
 
-export function prepareTest(ctx) {
+export function prepareTest(ctx, { agent } = {}) {
   return lock(ctx, () => {
     const state = load(ctx);
     if (!state) throw new Error('Run setup first.');
+    if (agent && !state.agents.includes(agent)) throw new Error('Choose an installed agent for this test.');
     if (exists(probePath(ctx))) throw new Error('A test is already active. Finish it or run agent-memory test clean.');
     const id = crypto.randomBytes(6).toString('hex'), phrase = `preflight-${crypto.randomBytes(16).toString('hex')}`, label = `label-${crypto.randomBytes(16).toString('hex')}`;
     const fixture = `agent-memory-test-${id}.md`;
     const content = `---\nstatus: test-only\nscope: fictional task; never operational advice\n---\n# Memory rehearsal ${id}\nThe preflight phrase for the fictional task "memory rehearsal ${id}" is ${phrase}.\n`;
-    const p = { root: state.memoryDir, id, phrase, label, fixture, fixtureHash: hash(content), receipts: [], before: fs.readdirSync(path.join(state.memoryDir, 'inbox')) };
+    const p = { root: state.memoryDir, id, phrase, label, fixture, fixtureHash: hash(content), receipts: [], agent, fingerprint: agent ? fingerprint(ctx, agent) : undefined, before: fs.readdirSync(path.join(state.memoryDir, 'inbox')) };
     atomicWrite(path.join(state.memoryDir, 'inbox', fixture), content);
     try { atomicWrite(probePath(ctx), JSON.stringify(p, null, 2)); } catch (e) { fs.unlinkSync(path.join(state.memoryDir, 'inbox', fixture)); throw e; }
     return {
@@ -306,9 +311,25 @@ export function checkTest(ctx, answer) {
     const found = receipts(p);
     p.receipts = found.map(name => ({ name, digest: hash(read(path.join(p.root, 'inbox', name))) }));
     atomicWrite(probePath(ctx), JSON.stringify(p, null, 2));
+    if (p.agent) saveVerification(ctx, p.agent, { read: readOk ? 'verified' : 'failed', write: found.length ? 'verified' : 'failed', evidence: 'manual challenge; user supplied answer, file capture inspected', fingerprint: p.fingerprint });
     return { ok: readOk && found.length > 0, read: readOk, write: found.length > 0, savedFiles: found.map(name => path.join(p.root, 'inbox', name)), note: 'Manual challenge check; not an automatic test of every agent or future task.' };
   });
 }
+
+export function fingerprint(ctx, agent) {
+  const state = load(ctx);
+  if (!state) return '';
+  return hash(JSON.stringify([state.memoryDir, read(targets(ctx)[agent]), read(path.join(state.memoryDir, 'MEMORY.md'))]));
+}
+
+export function saveVerification(ctx, agent, result) {
+  const p = path.join(ctx.configDir, 'verification.json');
+  let results = {}; try { results = JSON.parse(read(p) || '{}'); } catch { /* Replace damaged derived evidence only. */ }
+  results[agent] = { ...result, checkedAt: new Date().toISOString() };
+  atomicWrite(p, JSON.stringify(results, null, 2));
+}
+
+export { read, hash, atomicWrite, noLink, load, lock, managed, apply, receipts, probe, claudeRule };
 
 export function cleanTest(ctx) {
   return lock(ctx, () => {

@@ -3,6 +3,10 @@ import path from 'node:path';
 import process from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { context, AGENTS, VERSION, detect, discoverObsidian, planSetup, install, planUninstall, uninstall, doctor, instructions, prepareTest, checkTest, cleanTest } from '../src/core.mjs';
+import { search, show, maintenance, previewMaintenance, applyMaintenance } from '../src/notebook.mjs';
+import { planProject, connectProject } from '../src/projects.mjs';
+import { verifyLive } from '../src/verification.mjs';
+import { serveUI } from '../src/ui.mjs';
 
 const HELP = `
   AGENT MEMORY · Learn once. Reuse across agents.
@@ -10,8 +14,14 @@ const HELP = `
   Usage: agent-memory <command> [options]
 
   setup                 Guided setup with a preview before writing
+  ui                    Graphical setup, folder picker, diagnostics and tests
   doctor                Check files and show remaining manual steps (no AI calls)
   instructions [agent]  Print the shared pointer for an agent's global rules
+  search "KEYWORDS"     Title-first lookup; at most 8 hits / 4,000 characters
+  show "relative.md"    Bounded excerpt; default 40, maximum 60 lines
+  project add/remove    Connect a personal project with --path DIRECTORY
+  maintain              Preview duplicates, stale notes and possible conflicts
+  verify --agent NAME   Optional fresh CLI verification; requires --live
   test [prepare]        Create a private read/write challenge and show prompts
   test check            Verify an exact answer and a saved test lesson
   test clean            Remove unchanged, identified test files
@@ -20,13 +30,23 @@ const HELP = `
   Setup options:
     --memory-dir PATH   Knowledge folder (default: ~/AgentMemory)
     --notes-dir PATH    Optional existing Markdown notes to consult
-    --agents LIST      codex,claude,cursor,antigravity (or all)
+    --agents LIST      codex,claude,cursor,antigravity,opencode,copilot,windsurf,cline
     --allow-capture     Allow Claude to write inbox Markdown files only
+    --upgrade-policy    Replace MEMORY.md with efficient policy (backed up)
     --dry-run           Preview setup/uninstall without changing files
     --yes               Apply without the confirmation prompt
 
   Other options:
     --answer TEXT       Exact phrase returned by an agent, for test check
+    --agent NAME        Attribute a guided test, or select a live-test CLI
+    --source notes      Search an explicitly configured existing notes source
+    --limit N           Search hits, 1–8 (default 8)
+    --start N --lines N Excerpt range (default 1 / 40)
+    --archive-duplicates --reindex   Maintenance actions to preview
+    --apply --plan ID   Apply a previously reviewed maintenance plan
+    --path DIRECTORY   Project to connect or disconnect
+    --live             Opt in to agent calls; may use provider credits
+    --no-open --port N UI: print local URL without opening; optional port
     --json              Machine-readable output; requires explicit setup options
     --help              Show help
     --version           Show version
@@ -43,8 +63,8 @@ const HELP = `
 
 function parse(argv) {
   const flags = {}, positional = [];
-  const values = new Set(['memory-dir', 'notes-dir', 'agents', 'answer']);
-  const booleans = new Set(['allow-capture', 'dry-run', 'yes', 'json', 'help', 'version']);
+  const values = new Set(['memory-dir', 'notes-dir', 'agents', 'answer', 'agent', 'source', 'limit', 'start', 'lines', 'plan', 'path', 'port']);
+  const booleans = new Set(['allow-capture', 'upgrade-policy', 'dry-run', 'yes', 'json', 'help', 'version', 'archive-duplicates', 'reindex', 'apply', 'live', 'no-open']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '-h') { flags.help = true; continue; }
@@ -66,11 +86,12 @@ function options(flags) {
     memoryDir: flags['memory-dir'], notesDir: flags['notes-dir'],
     agents: flags.agents === 'all' ? AGENTS : flags.agents?.split(',').map(x => x.trim()).filter(Boolean),
     allowCapture: Boolean(flags['allow-capture']),
+    upgradePolicy: Boolean(flags['upgrade-policy']),
   };
 }
 
 function publicPlan(plan) {
-  return { memoryDir: plan.root || plan.state?.memoryDir, agents: plan.agents || plan.state?.agents, changes: plan.changes.map(c => ({ path: c.path, action: c.after === null ? 'remove' : c.before === null ? 'create' : 'update', kind: c.kind })), notesKeptOnUninstall: true };
+  return { memoryDir: plan.state?.memoryDir || plan.root, agents: plan.agents || plan.state?.agents, changes: plan.changes.map(c => ({ path: c.path, action: c.after === null ? 'remove' : c.before === null ? 'create' : 'update', kind: c.kind })), notesKeptOnUninstall: true };
 }
 
 async function main() {
@@ -78,12 +99,12 @@ async function main() {
   if (flags.version) { console.log(VERSION); return; }
   if (flags.help || !positional.length) { console.log(HELP); return; }
   const [cmd, sub] = positional;
-  const commands = ['setup', 'doctor', 'instructions', 'test', 'uninstall'];
+  const commands = ['setup', 'ui', 'doctor', 'instructions', 'test', 'uninstall', 'search', 'show', 'maintain', 'project', 'verify'];
   if (!commands.includes(cmd)) throw new Error(`Unknown command: ${cmd}. Run agent-memory --help.`);
-  if (positional.length > (['test', 'instructions'].includes(cmd) ? 2 : 1)) throw new Error('Unexpected extra arguments. Run agent-memory --help.');
-  const setupOnly = ['memory-dir', 'notes-dir', 'agents', 'allow-capture'];
+  if (positional.length > (['test', 'instructions', 'search', 'show', 'project'].includes(cmd) ? 2 : 1)) throw new Error('Unexpected extra arguments. Run agent-memory --help.');
+  const setupOnly = ['memory-dir', 'notes-dir', 'agents', 'allow-capture', 'upgrade-policy'];
   if (cmd !== 'setup' && setupOnly.some(k => flags[k] !== undefined)) throw new Error('Folder, agent, and capture options belong to the setup command.');
-  if (flags['dry-run'] && !['setup', 'uninstall'].includes(cmd)) throw new Error('--dry-run is supported for setup and uninstall only.');
+  if (flags['dry-run'] && !['setup', 'uninstall', 'project', 'maintain'].includes(cmd)) throw new Error('--dry-run is supported for setup, project, maintenance and uninstall only.');
   if (flags.answer !== undefined && !(cmd === 'test' && sub === 'check')) throw new Error('--answer is supported for test check only.');
   const ctx = context();
   let rl;
@@ -93,7 +114,7 @@ async function main() {
     return (await rl.question(`${question}${fallback ? ` [${fallback}]` : ''}: `)).trim() || fallback;
   };
   const confirm = async message => flags.yes || /^(y|yes)$/iu.test(await ask(message + ' (y/N)', 'n'));
-  const output = value => console.log(JSON.stringify(value, null, 2));
+  const output = value => console.log(JSON.stringify(value, null, flags.json ? undefined : 2));
   try {
     if (cmd === 'setup') {
       const opts = options(flags);
@@ -130,12 +151,56 @@ async function main() {
       else {
         if (d.memoryDir) console.log(`\n  Memory: ${d.memoryDir}\n`);
         for (const c of d.checks) console.log(`  ${c.status.toUpperCase().padEnd(7)} ${c.label}`);
+        for (const c of d.connections || []) console.log(`  ${c.name}: read ${c.read}, write ${c.write}${c.stale ? ' (previous evidence stale)' : ''}`);
+        if (d.retrieval) console.log(`\n  Startup pointer: ${d.retrieval.pointerCharacters} characters. Notebook not preloaded. Search output capped at 4,000 characters.`);
         console.log('\n  No model calls made. Agent behavior and sandbox permissions require a fresh-chat test.\n');
       }
       if (!d.ok) process.exitCode = 1;
     } else if (cmd === 'instructions') {
       const text = instructions(ctx, sub);
       if (flags.json) output({ instructions: text }); else console.log(text);
+    } else if (cmd === 'search') {
+      const r = search(ctx, sub, { limit: flags.limit === undefined ? 8 : Number(flags.limit), source: flags.source || 'memory' });
+      if (flags.json) output(r); else {
+        for (const hit of r.hits) console.log(`${hit.path}:${hit.line}  ${hit.title}${hit.snippet ? '\n  ' + hit.snippet : ''}`);
+        console.log(r.guidance + (r.partial ? ' Scan was partial.' : ''));
+      }
+    } else if (cmd === 'show') {
+      const r = show(ctx, sub, { start: Number(flags.start || 1), lines: Number(flags.lines || 40), source: flags.source || 'memory' });
+      if (flags.json) output(r); else console.log(r.excerpt + (r.truncated ? '\n[Excerpt truncated]' : ''));
+    } else if (cmd === 'maintain') {
+      if (flags.apply) {
+        if (flags['dry-run']) throw new Error('Choose preview or apply, not both.');
+        if (!flags.plan) throw new Error('Preview first, then supply its --plan ID.');
+        if (!await confirm('Apply only the reviewed archive/index actions?')) { console.log('Cancelled.'); return; }
+        output(applyMaintenance(ctx, flags.plan));
+      } else {
+        const opts = { archiveDuplicates: Boolean(flags['archive-duplicates']), reindex: Boolean(flags.reindex) };
+        const result = flags['dry-run'] ? maintenance(ctx, opts).summary : previewMaintenance(ctx, opts);
+        output(result);
+        if (!flags.json) console.log(`\nNothing changed in your notes. To apply reviewed actions: agent-memory maintain --apply --plan ${result.planId}`);
+      }
+    } else if (cmd === 'project') {
+      if (!['add', 'remove', 'list'].includes(sub)) throw new Error('Choose project add, remove, or list.');
+      if (sub === 'list') { const d = doctor(ctx); output({ projects: d.projects || [] }); return; }
+      if (!flags.path) throw new Error('Specify the project directory with --path.');
+      const opts = { remove: sub === 'remove' }, plan = planProject(ctx, flags.path, opts);
+      if (flags.json && !flags['dry-run'] && !flags.yes) throw new Error('Use --yes to apply or --dry-run to preview.');
+      if (flags.json && flags['dry-run']) { output({ ...publicPlan(plan), project: plan.root, warnings: plan.warnings, applied: false }); return; }
+      if (!flags.json) { console.log(`Personal project: ${plan.root}`); for (const c of publicPlan(plan).changes) console.log(`  ${c.action} ${c.path}`); for (const w of plan.warnings) console.log(`  ${w}`); }
+      if (flags['dry-run']) return;
+      if (!await confirm('Apply this personal project connection change?')) { console.log('Cancelled.'); return; }
+      output(connectProject(ctx, flags.path, opts));
+    } else if (cmd === 'verify') {
+      if (!flags.agent) throw new Error('Choose --agent codex, claude, or opencode, and opt in with --live.');
+      if (!flags.json) console.log('Running fresh bounded CLI checks. Your agent provider may charge for these calls.');
+      const r = await verifyLive(ctx, flags.agent, { live: Boolean(flags.live) }); output(r); if (!r.ok) process.exitCode = 1;
+    } else if (cmd === 'ui') {
+      if (flags.json) throw new Error('The UI prints a private local URL; use other commands for JSON automation.');
+      const port = Number(flags.port || 0); if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Choose a port between 0 and 65535.');
+      const ui = await serveUI(ctx, { port, open: !flags['no-open'] });
+      console.log(`\n  Agent Memory · local setup\n  ${ui.url}\n\n  This private loopback UI closes after 15 idle minutes. Press Ctrl+C to stop.\n`);
+      process.once('SIGINT', () => ui.server.close()); process.once('SIGTERM', () => ui.server.close());
     } else if (cmd === 'uninstall') {
       const plan = planUninstall(ctx);
       if (flags.json) {
@@ -151,7 +216,7 @@ async function main() {
       console.log('\n  Disconnected. Notes and backups kept.\n  Also remove the Cursor account User Rule and any memory-only permissions added in agent UIs.');
     } else {
       if (!sub || sub === 'prepare') {
-        const p = prepareTest(ctx);
+        const p = prepareTest(ctx, { agent: flags.agent });
         if (flags.json) output(p);
         else console.log(`\n  Test prepared. Start a fresh agent chat.\n\n  1. Paste this read prompt (the answer is intentionally hidden):\n\n${p.readPrompt}\n\n  2. Paste this capture prompt:\n\n${p.writePrompt}\n\n  3. Run agent-memory test check and paste ONLY the returned preflight phrase.\n  4. Run agent-memory test clean afterwards.\n\n  Repeat per agent. To test sharing, use another fresh agent for step 1.\n  This CLI does not launch models or spend provider credits.\n`);
       } else if (sub === 'check') {

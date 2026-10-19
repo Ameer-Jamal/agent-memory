@@ -19,6 +19,11 @@ npm run verify
 bin/agent-memory.mjs    CLI, guided questions, preview and confirmations
 src/core.mjs           Planning, installation, backup, rollback and checks
 src/templates.mjs      Small global pointer and shared Markdown policy
+src/adapters.mjs       Agent instruction targets and runner availability
+src/notebook.mjs       Bounded search/excerpts and reviewed maintenance
+src/projects.mjs       Personal project pointers and local excludes
+src/verification.mjs   Opt-in bounded fresh CLI checks
+src/ui.mjs + web/      Temporary authenticated loopback setup app
 test/                  Isolated filesystem and command tests
 docs/                  Guides and SVG illustrations
 ```
@@ -41,3 +46,5 @@ Do not disable a sandbox, broaden shell permissions, invoke paid model calls in 
 Describe the user-visible problem, resulting behavior, and relevant tests. Include before/after output for CLI changes and a screenshot or render for visual changes. Keep unrelated cleanup separate. Use synthetic paths and notes in examples.
 
 For bugs, start with the issue template and redact private material. For vulnerabilities, follow [SECURITY.md](SECURITY.md).
+
+Retrieval changes must keep the 4,000-character serialized search/show caps and explicit partial-scan reporting. Avoid unconditional notebook/index loads in global instructions. UI actions require authorization/origin checks and previews; tests must not launch native dialogs or real models.

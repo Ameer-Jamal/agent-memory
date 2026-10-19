@@ -13,7 +13,7 @@ Resolve failed checks and complete relevant manual steps. `PASS` here means the 
 ## 2. Prepare a challenge
 
 ```sh
-agent-memory test
+agent-memory test --agent opencode
 ```
 
 The CLI creates one fictional note in `inbox/`, stores private test state, and prints two prompts. The first prompt has a random task name. The expected phrase and its file path are intentionally absent from the prompt.
@@ -54,7 +54,7 @@ agent-memory test check --answer "EXACT_PHRASE_FROM_YOUR_AGENT" --json
 agent-memory test clean --yes --json
 ```
 
-The CLI never launches models, selects a provider, accesses agent credentials, or spends model credits. Your agent may make its normal provider requests while answering the prompts.
+These guided commands never launch models or spend model credits. Optional live verification is separate. Your agent may make its normal provider requests while answering the prompts.
 
 ## Automated repository tests
 
@@ -64,3 +64,19 @@ npm run verify
 ```
 
 Tests cover config preservation, repeated installation, reconnecting a preserved memory folder, optional permission ownership, rollback, symlinks, malformed config, edited blocks, concurrent-operation locks, stale test fixtures, and CLI behavior. All installer tests use temporary homes; they do not write to your real coding-agent configs.
+
+## Optional automatic fresh CLI checks
+
+```sh
+agent-memory verify --agent opencode --live
+agent-memory verify --agent claude --live
+agent-memory verify --agent codex --live
+```
+
+These commands explicitly invoke your chosen CLI and may use provider credits. They run a fresh read-only discovery call, then (only after read succeeds) a scoped capture call. Final answer text is graded, not tool output. The capture is checked on disk. Exact unchanged fixtures are cleaned afterwards; unexpected/edited files are retained.
+
+No model is silently changed, no credentials are copied, and no approval/sandbox bypass flags are used. A provider error, expired key, unsupported model, permission denial, timeout, or unavailable executable fails the relevant check. Other integrations use the guided challenge; config support does not imply an automatic runner.
+
+Use `doctor` or the GUI to see configured/read/write states separately. Results record evidence type and date; changing the global pointer or policy marks old results stale. For manual challenges, pass `--agent NAME` when preparing so results are attributed to that tool. Manual results depend on the answer the user supplies and are identified as manual evidence.
+
+Each CLI stage has a two-minute timeout and a 128 KiB output limit. Those caps bound the test process/output, not a precise model-token or provider-spend budget. Live verification uses synthetic notes, but your selected CLI may load its normal personal customization before the task.
