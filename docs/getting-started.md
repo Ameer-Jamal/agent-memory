@@ -6,10 +6,12 @@ Install [Node.js 22+](https://nodejs.org/) and [Git](https://git-scm.com/downloa
 
 ```sh
 npm install --global git+https://github.com/Ameer-Jamal/agent-memory.git
-agent-memory setup
+agent-memory ui
 ```
 
 This installs the package directly from GitHub. There are no runtime dependencies, build step, API keys, or memory service to configure. Your selected agents need their own normal installation and login.
+
+The graphical setup includes folder selection, agent checkboxes, previews, and connection status. See [GUI guide](gui.md). For a terminal wizard, run `agent-memory setup`.
 
 Without a global installation:
 
@@ -67,6 +69,8 @@ To make a preference explicit:
 
 Add project scope and concrete commands when appropriate. A preference is user-stated; it is not evidence that a command has been tested.
 
+Agents do not preload your notebook or index at startup. They search titles/keywords, read at most two short excerpts initially, and stop if nothing helps. See [retrieval design](retrieval.md).
+
 No maintenance task is scheduled. Periodically ask an agent to review the inbox, consolidate useful lessons, update the index, and flag stale or contradictory advice.
 
 ## Remove or update
@@ -101,3 +105,20 @@ You can run `node bin/agent-memory.mjs` in place of the installed command. `npm 
 State and backups are stored in `~/.config/agent-memory`. They can contain copies of your existing configuration, so keep them private. Notes live in the independently chosen memory folder.
 
 Advanced: `AGENT_MEMORY_CONFIG_DIR` selects an alternate installer state directory. It does **not** redirect agent config files. Developers testing isolated homes should use the programmatic `context({home, configDir})` API or an isolated OS-user environment. Do not change this variable casually between installs; the original state is needed to preserve ownership during uninstall.
+
+## Personal project connections
+
+After setup, connect an existing project:
+
+```sh
+agent-memory project add --path "/path/to/project" --dry-run
+agent-memory project add --path "/path/to/project"
+agent-memory project list
+agent-memory project remove --path "/path/to/project"
+```
+
+Only a small pointer is added to root AGENTS.md. The knowledge stays in the personal memory folder; this is not team knowledge sharing. Existing project instructions and later edits are preserved. New AGENTS.md pointers in ordinary Git checkouts get a local `.git/info/exclude` entry. Already-tracked instruction files and worktree metadata are not automatically ignored: review their diffs before committing. No global Git settings are changed.
+
+## Upgrade a 0.1 policy
+
+`agent-memory setup` refreshes owned instruction blocks. Existing policy files are otherwise kept. Use `agent-memory setup --upgrade-policy` to preview and explicitly replace MEMORY.md with the bounded retrieval policy; the previous file is backed up. Other notes remain intact.

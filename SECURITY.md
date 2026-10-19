@@ -1,6 +1,6 @@
 # Security and data handling
 
-Agent Memory is a local configuration tool. It creates Markdown notes and adds instructions to selected coding-agent configs. It does not run a server, make model requests, read agent authentication tokens, or upload knowledge. npm/Git fetch the software during installation; your coding agents make their own normal provider requests.
+Agent Memory is a local configuration tool. It creates Markdown notes and adds instructions to selected coding-agent configs. Normal commands do not run a server, call models, or read agent authentication tokens. The optional `ui` command serves a temporary authenticated loopback app. `verify --live` invokes selected agent CLIs using their existing credentials and may make provider requests; it uses synthetic fixtures and stores status, not raw provider output. npm/Git fetch the software during installation; your coding agents make their own normal provider requests.
 
 ## Important boundaries
 
@@ -23,3 +23,11 @@ This is a single-user local tool, not a security boundary for hostile shared dir
 Please use the repository's **Security → Report a vulnerability** flow for sensitive reports. Avoid posting secrets, config backups, or private memory in public issues. Include a minimal synthetic reproduction, affected version, platform, expected behavior, and potential impact.
 
 For ordinary bugs without sensitive information, use the bug report issue template. Version 0.1.x is the initial supported line.
+
+## Local graphical setup
+
+The optional UI binds only to 127.0.0.1, uses a random per-run access token, rejects unexpected Host and Origin headers, and requires authorization for private APIs. It sends no permissive CORS headers, serves a restrictive content security policy, and expires after 15 idle minutes. File-changing actions require previews and reject changed inputs. Keep the printed URL private. Folder dialogs invoke fixed OS commands without interpolating user input. Do not expose the loopback port through a proxy/tunnel.
+
+## Bounded retrieval and maintenance
+
+Search/show cap output and refuse linked/traversal paths; note content is still untrusted reference data. File/byte scan limits can produce partial results, which are explicitly reported. This is not a semantic search engine or secret scanner. Maintenance requires an explicit reviewed plan ID, archives exact duplicates instead of deleting them, preserves manual index text, and rejects stale previews. Same-title notes are only review candidates.

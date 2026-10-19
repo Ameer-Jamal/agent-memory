@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="540" viewBox="0 0 1280 540" role="img" aria-labelledby="title desc">
-<title id="title">Agent Memory</title><desc id="desc">Learn once. Reuse across agents. Claude Code, Codex, Cursor and Antigravity share one Markdown notebook.</desc>
+<title id="title">Agent Memory</title><desc id="desc">Learn once. Reuse across agents. Eight coding agents share one Markdown notebook through bounded searches.</desc>
 <defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#111b2a"/><stop offset="1" stop-color="#192c35"/></linearGradient><linearGradient id="line"><stop stop-color="#7c9bba"/><stop offset="1" stop-color="#9ad3b3"/></linearGradient></defs>
 <rect width="1280" height="540" rx="24" fill="url(#bg)"/>
 <circle cx="1160" cy="20" r="270" fill="#2a5252" opacity=".14"/>
@@ -12,13 +12,13 @@
 <text x="62" y="299" fill="#bac7cf" font-size="20">Keep the fixes, preferences, and procedures</text>
 <text x="62" y="330" fill="#bac7cf" font-size="20">you should only have to explain once.</text>
 <g font-size="14" fill="#d4dfdf"><rect x="62" y="398" width="150" height="36" rx="18" fill="#263c45"/><text x="87" y="421">Plain Markdown</text><rect x="223" y="398" width="130" height="36" rx="18" fill="#263c45"/><text x="248" y="421">Local files</text><rect x="364" y="398" width="168" height="36" rx="18" fill="#263c45"/><text x="387" y="421">Obsidian optional</text></g>
-<path d="M806 191h44v149h-44M850 265h49" fill="none" stroke="url(#line)" stroke-width="2"/>
+<path d="M806 179h44v164h-44M850 265h49" fill="none" stroke="url(#line)" stroke-width="2"/>
 <g fill="#213440" stroke="#3d5360"><rect x="619" y="147" width="188" height="64" rx="12"/><rect x="619" y="229" width="188" height="64" rx="12"/><rect x="619" y="311" width="188" height="64" rx="12"/><rect x="619" y="393" width="188" height="64" rx="12"/></g>
 <path d="M806 425h44v-85" fill="none" stroke="#7c9bba" stroke-width="2"/>
-<g fill="#e1e9e8" font-size="20" font-weight="500"><text x="643" y="186">Claude Code</text><text x="643" y="268">Codex</text><text x="643" y="350">Cursor</text><text x="643" y="432">Antigravity</text></g>
+<g fill="#e1e9e8" font-size="14" font-weight="500"><text x="643" y="186">Claude · Codex</text><text x="643" y="268">Cursor · Antigravity</text><text x="643" y="350">OpenCode · Copilot CLI</text><text x="643" y="432">Windsurf · Cline</text></g>
 <rect x="902" y="165" width="318" height="230" rx="16" fill="#203a40" stroke="#6eab96" stroke-width="1.5"/>
 <text x="927" y="205" fill="#a5dbc1" font-size="14" letter-spacing="2" font-weight="600">ONE SOURCE OF KNOWLEDGE</text>
 <path d="M928 221h266" stroke="#476360"/>
-<g font-family="SFMono-Regular,Consolas,monospace" font-size="19"><text x="927" y="258" fill="#eef3ee">INDEX.md</text><text x="927" y="295" fill="#bbcfc9">topics/</text><text x="927" y="332" fill="#bbcfc9">inbox/</text><text x="927" y="369" fill="#88b29e" font-size="14">Read → solve → save</text></g>
+<g font-family="SFMono-Regular,Consolas,monospace" font-size="19"><text x="927" y="258" fill="#eef3ee">Search → excerpt</text><text x="927" y="295" fill="#bbcfc9">topics/</text><text x="927" y="332" fill="#bbcfc9">inbox/</text><text x="927" y="369" fill="#88b29e" font-size="14">Read → solve → save</text></g>
 <text x="62" y="496" fill="#7e969d" font-size="13" letter-spacing="1">OPEN SOURCE  /  NO MEMORY SERVER  /  YOUR NOTES, YOUR FOLDER</text>
 </g></svg>

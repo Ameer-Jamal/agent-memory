@@ -4,7 +4,7 @@
 
 Start a fresh chat. Run `agent-memory doctor`, open the listed instruction file, and confirm the managed block points to your memory folder. Complete the tool-specific steps in [compatibility](compatibility.md), then run `agent-memory test`.
 
-A pointer is an instruction to read files; it does not automatically inject every note into context. Relevant topics and recent inbox notes are consulted as needed.
+A pointer is an instruction to read files; it does not automatically inject every note into context. Agents now use titles/keywords and bounded excerpts, not an automatic full index/policy read. Relevant topics and recent inbox notes are consulted as needed.
 
 ## Cursor does not discover the local rule
 
@@ -58,3 +58,19 @@ Provide an accessible copy to that runtime and configure its instruction entry p
 ## Report an issue safely
 
 Include OS, Node version, CLI version, agent/version, command, and redacted diagnostics. Never upload your private memory, provider credentials, or config backups. Use a minimal synthetic reproduction when possible.
+
+## OpenCode reports an expired key
+
+An API key can expire independently of the memory integration. The live runner reports a failed read check and skips capture. Replace the key through that provider's normal console/setup, then retry; signing in again may not renew an expired API key. Agent Memory never replaces credentials or silently switches providers/models.
+
+## Search found nothing, or says partial
+
+Try two or three distinctive literal keywords from the symptom, title, or error. Keywords are AND-matched. Searches are deliberately bounded and may scan only part of a large collection. Follow a specific filename lead with local grep rather than dumping the notebook. No useful match is a signal to continue the task using current evidence, not to read every file.
+
+## The GUI cannot select a folder
+
+Paste the path into the field. Linux's optional native picker needs zenity. Existing-folder dialogs cannot create every kind of new nested path; select a parent, then append the new subfolder in the input. The installer creates it after preview.
+
+## Live evidence is stale
+
+The global instruction file or MEMORY.md changed after verification. Run a fresh challenge to establish current evidence. Configured, read-verified, and write-verified are separate states; a stale or failed check is not silently treated as success.

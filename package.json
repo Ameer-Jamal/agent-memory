@@ -1,20 +1,50 @@
 {
   "name": "@ameer-jamal/agent-memory",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shared Markdown memory for coding agents. Learn once, reuse across tools.",
   "type": "module",
-  "bin": { "agent-memory": "bin/agent-memory.mjs" },
-  "files": ["bin", "src", "docs", "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md"],
-  "engines": { "node": ">=22" },
+  "bin": {
+    "agent-memory": "bin/agent-memory.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "docs",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "web"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "node --test",
-    "check": "node --check bin/agent-memory.mjs && node --check src/core.mjs && node --check src/templates.mjs",
+    "check": "node scripts/check.mjs",
     "verify": "npm run check && npm test && npm pack --dry-run"
   },
-  "repository": { "type": "git", "url": "https://github.com/Ameer-Jamal/agent-memory.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ameer-Jamal/agent-memory.git"
+  },
   "homepage": "https://github.com/Ameer-Jamal/agent-memory#readme",
   "bugs": "https://github.com/Ameer-Jamal/agent-memory/issues",
   "author": "Ameer Jamal",
   "license": "MIT",
-  "keywords": ["coding-agents", "memory", "markdown", "codex", "claude-code", "cursor", "antigravity", "obsidian"]
+  "keywords": [
+    "coding-agents",
+    "memory",
+    "markdown",
+    "codex",
+    "claude-code",
+    "cursor",
+    "antigravity",
+    "obsidian",
+    "opencode",
+    "copilot-cli",
+    "windsurf",
+    "cline"
+  ]
 }
