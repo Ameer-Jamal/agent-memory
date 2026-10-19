@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="640" viewBox="0 0 1160 640" role="img" aria-labelledby="title desc">
+<title id="title">Guided setup preview</title><desc id="desc">An illustrative terminal session selecting a memory folder and agents, previewing changes, and asking for confirmation. Notes stay in the user's chosen folder.</desc>
+<rect width="1160" height="640" rx="18" fill="#101923"/>
+<path d="M18 0h1124a18 18 0 0 1 18 18v32H0V18A18 18 0 0 1 18 0" fill="#23313e"/>
+<circle cx="25" cy="25" r="6" fill="#ef8780"/><circle cx="46" cy="25" r="6" fill="#d8bc7a"/><circle cx="67" cy="25" r="6" fill="#8fc9a5"/>
+<text x="580" y="31" font-family="-apple-system,Segoe UI,Arial,sans-serif" text-anchor="middle" fill="#b9c5cd" font-size="14">Agent Memory · illustrative setup walkthrough</text>
+<g font-family="SFMono-Regular,Consolas,Liberation Mono,monospace" font-size="18">
+<text x="40" y="99" fill="#e2ebe7">$ agent-memory setup</text>
+<text x="40" y="151" fill="#a5dbc1" font-weight="700">Agent Memory</text>
+<text x="40" y="181" fill="#95a7b5">A shared notebook for your coding agents. Obsidian is optional.</text>
+<text x="40" y="232" fill="#dce5e4">Where should your memory live?</text>
+<text x="40" y="261" fill="#a5dbc1">~/AgentMemory</text>
+<text x="40" y="309" fill="#dce5e4">Which agents?</text>
+<text x="40" y="338" fill="#a5dbc1">codex, claude, cursor, antigravity</text>
+<text x="40" y="389" fill="#95a7b5">Preview before anything changes</text>
+<text x="40" y="424" fill="#a5dbc1">CREATE</text><text x="135" y="424" fill="#dce5e4">~/AgentMemory/MEMORY.md</text>
+<text x="40" y="455" fill="#a5dbc1">CREATE</text><text x="135" y="455" fill="#dce5e4">~/AgentMemory/INDEX.md</text>
+<text x="40" y="486" fill="#e6c789">UPDATE</text><text x="135" y="486" fill="#dce5e4">Selected agents' global instructions</text>
+<text x="40" y="542" fill="#e2ebe7">Apply this setup? (y/N):</text><rect x="348" y="525" width="11" height="22" fill="#a5dbc1"/>
+</g>
+<path d="M40 577h1080" stroke="#2d414b"/>
+<text x="40" y="608" font-family="-apple-system,Segoe UI,Arial,sans-serif" fill="#95a7b5" font-size="16">Existing config backed up. Notes stay local. Uninstall keeps your knowledge.</text>
+</svg>
