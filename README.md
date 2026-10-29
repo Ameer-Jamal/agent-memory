@@ -6,7 +6,7 @@
   <a href="https://github.com/Ameer-Jamal/agent-memory/actions/workflows/ci.yml"><img src="https://github.com/Ameer-Jamal/agent-memory/actions/workflows/ci.yml/badge.svg" alt="Tests"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5c9778" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/Node.js-22%2B-5c9778" alt="Node.js 22 or newer">
-  <img src="https://img.shields.io/badge/runtime_dependencies-0-6a7dbe" alt="Zero runtime dependencies">
+  <img src="https://img.shields.io/badge/MCP-local_stdio-6a7dbe" alt="Optional local MCP server">
 </p>
 
 # Agent Memory
@@ -15,9 +15,9 @@
 
 Give your coding agents a shared Markdown notebook for fixes, preferences, and procedures. When you switch tools or start a fresh chat, useful discoveries have somewhere to live.
 
-Connect **Claude Code, Codex, Cursor, Antigravity, OpenCode, GitHub Copilot CLI, Windsurf/Cascade, and Cline** through their supported instruction files. Use a regular folder, your existing Markdown notes, or an Obsidian vault. No Obsidian plugin is required.
+Connect **Claude Code, Codex, Cursor, Antigravity, OpenCode, GitHub Copilot CLI, Windsurf/Cascade, and Cline** through their supported instruction files. Use a regular folder, your existing Markdown notes, or an Obsidian vault. No Obsidian plugin is required. An optional local MCP server gives compatible agents explicit search, read, remember, and refresh tools.
 
-[Get started](#get-started) · [See how it works](#how-it-works) · [Compatibility](docs/compatibility.md) · [Troubleshooting](docs/troubleshooting.md) · [Contribute](CONTRIBUTING.md)
+[Get started](#get-started) · [See how it works](#how-it-works) · [MCP tools](#optional-mcp-tools) · [Compatibility](docs/compatibility.md) · [Troubleshooting](docs/troubleshooting.md) · [Contribute](CONTRIBUTING.md)
 
 ## Why use it?
 
@@ -39,7 +39,7 @@ For example: an agent discovers that a local test runner needs a particular Java
 
 ## Get started
 
-You need **[Node.js 22+](https://nodejs.org/)** and **[Git](https://git-scm.com/downloads)**. The installer has no runtime dependencies. Your chosen coding agents still need to be installed and signed in separately.
+You need **[Node.js 22+](https://nodejs.org/)** and **[Git](https://git-scm.com/downloads)**. The MCP server uses the official MCP SDK and Zod validation; no build step or API key is needed. Your chosen coding agents still need to be installed and signed in separately.
 
 ```sh
 npm install --global git+https://github.com/Ameer-Jamal/agent-memory.git
@@ -76,7 +76,7 @@ agent-memory search "java local runner" --json
 agent-memory show "topics/local-runner.md" --start 15 --lines 40
 ```
 
-Search prefers titles, returns at most **8 hits**, and caps serialized output at **4,000 characters**. `show` defaults to 40 lines, allows at most 60, and also caps output at 4,000 characters. Scans have local file/byte limits and report partial results. The notebook, full index, and capture policy are **not preloaded at task startup**. These bounds apply to this CLI, not to every file tool an agent might use. [Retrieval design](docs/retrieval.md).
+Search prefers titles, returns at most **8 hits**, and caps serialized output at **4,000 characters**. `show` defaults to 40 lines, allows at most 60, and also caps output at 4,000 characters. Scans have local file/byte limits and report partial results. The notebook, full index, and capture policy are **not preloaded at task startup**. Limits apply per lookup, not to all reading for a task: follow a relevant lead with another excerpt, a different line range, or a refined search. These bounds apply to this CLI, not to every file tool an agent might use. [Retrieval design](docs/retrieval.md).
 
 ### Already use Obsidian?
 
@@ -153,10 +153,33 @@ agent-memory verify --agent opencode --live
 
 Fresh CLI runners are available for **OpenCode, Claude Code, and Codex**. Opting in makes up to two agent calls using your existing provider account and can consume credits. Read and write outcomes are stored separately; changed policy/configuration makes old evidence stale. Other integrations use the guided challenge. No runner bypasses permissions or silently switches models. [Testing details](docs/testing.md).
 
+## Optional MCP tools
+
+Give your agent explicit memory actions instead of relying only on file instructions:
+
+```sh
+agent-memory mcp-config --allow-write
+```
+
+Paste the printed connection block into a **local stdio-capable MCP client**, merging it with existing servers. It runs `agent-memory mcp --allow-write`; omit `--allow-write` for read-only use. The config command prints paths for your machine and changes no client settings. Save it in the client’s MCP settings, then reconnect or start a fresh chat. Instruction-file support for an agent does not automatically establish MCP support in every app surface.
+
+| Tool | Purpose |
+| --- | --- |
+| `memory_search` | Find up to eight matches; bounded output per lookup |
+| `memory_read` | Read short excerpts and drill down with line ranges |
+| `memory_remember` | Preview similar lessons, then save, reuse, or record a useful difference |
+| `memory_refresh` | Reload health/counts/revision from disk without loading every note |
+
+Try: “Remember this preference for future agents…” or “Refresh memory status, then look for a fix for this error.” Capture requires two tool calls (preview, then decision), preserves existing files, and rejects stale reviews. The agent judges semantic overlap; the server does not compute a 90% meaning score. Exact generated duplicates found among the bounded preview candidates are reused automatically.
+
+MCP does not run a background learner, invoke a model, collect chat transcripts, or guarantee that an agent calls the tools. The local server has no HTTP endpoint or remote connector URL. [Connection and testing guide](docs/mcp.md).
+
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
+| `agent-memory mcp` | Local MCP server; read-only unless explicitly enabled |
+| `agent-memory mcp-config --allow-write` | Print a connection snippet for a local MCP client |
 | `agent-memory ui` | Local graphical setup, folder picker, connections and tests |
 | `agent-memory setup` | Guided terminal installation and preview |
 | `agent-memory search "keywords" --json` | Bounded title-first lookup |
@@ -175,12 +198,12 @@ Run `agent-memory --help` for explicit paths, agent selection, JSON output, and 
 
 ## Privacy and control
 
-- **No account, telemetry, or always-running memory service.** Ordinary commands use local files. The optional graphical setup runs a temporary authenticated loopback server. Only `verify --live` invokes your agent provider; it uses synthetic test notes. Installation fetches code from GitHub through npm.
+- **No account, telemetry, or always-running memory service.** Ordinary commands use local files. The optional MCP command runs a child process over stdin/stdout and reads current files per request. The optional graphical setup runs a temporary authenticated loopback server. Only `verify --live` invokes your agent provider; it uses synthetic test notes. Installation fetches code from GitHub through npm.
 - **Your chosen AI provider still processes what its agent reads.** Local storage does not make a cloud model offline or private from its provider.
 - **Private by default.** The generated memory folder has a Git ignore rule for its contents. Keep personal notes out of public repos and review files before sharing them.
 - **No secrets in lessons.** The policy excludes credentials and sensitive logs. This is an instruction, not an automatic secret scanner.
 - **Reversible setup.** Marked blocks, local backups, duplicate detection, atomic file writes, and rollback on normal write failures protect existing config. Later edits outside managed blocks are preserved on uninstall.
-- **No broad permission bypass.** Read-only sessions stay read-only. Agent sandboxes and existing restrictions still apply.
+- **Explicit write access.** File-tool permissions and agent sandboxes still apply. MCP is read-only by default; `--allow-write` explicitly grants its local process new-inbox-note capture, independently of the agent’s file-tool permissions. Client tool approvals still apply.
 
 See [security and data handling](SECURITY.md) for scope and recovery details.
 
@@ -226,14 +249,14 @@ agent-memory project add --path "/path/to/project"
 
 This adds a small `AGENTS.md` pointer to your personal notebook. It does not copy knowledge into the repo or create a team knowledge feature. New pointer files in ordinary Git checkouts receive a local `.git/info/exclude` entry. Already-tracked instruction files and worktrees require review before committing. Use `project remove --path ...` to disconnect. [Project details](docs/getting-started.md#personal-project-connections).
 
-### Update an existing 0.1 installation
+### Update an existing installation
 
 ```sh
 npm install --global git+https://github.com/Ameer-Jamal/agent-memory.git
 agent-memory setup --upgrade-policy
 ```
 
-Setup refreshes its managed pointers. `--upgrade-policy` explicitly replaces `MEMORY.md` with the efficient policy and saves a backup; topics and lessons are kept. Review custom policy text before opting in. Existing notebooks are otherwise preserved.
+For installations from 0.1 or 0.2, setup refreshes managed pointers to include the MCP guidance. MCP client registration remains a separate opt-in step. `--upgrade-policy` explicitly replaces `MEMORY.md` with the efficient policy and saves a backup; topics and lessons are kept. Review custom policy text before opting in. Existing notebooks are otherwise preserved.
 
 ## Development
 

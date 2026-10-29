@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 — 2026-10-29
+
+- Optional local stdio MCP server with bounded search/read, metadata refresh, and previewed inbox capture. Uses the official SDK and Zod; runtime dependencies are no longer zero.
+- Read-only default; explicit inbox-write opt-in, expiring duplicate reviews, stale/concurrent-change checks, and exclusive new-note writes.
+- Connection-snippet command and modern/legacy real-client protocol tests.
+- Near-duplicate capture policy: reuse matching-scope lessons with over 90% semantic overlap and no useful new information; preserve material differences. Similarity remains agent judgment.
+
 ## 0.2.0 — 2026-10-18
 
 - Search-first policy: no whole-notebook startup loads, two initial searches/notes, and stop when no useful lead appears.

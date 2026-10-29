@@ -1,6 +1,6 @@
 # Compatibility
 
-Agent Memory connects tools through their existing Markdown instruction mechanisms. It does not intercept their requests or require an MCP server.
+Agent Memory connects tools through their existing Markdown instruction mechanisms. It does not intercept their requests. An optional local stdio MCP server offers explicit memory tools; file-only connections still work. See [MCP setup](mcp.md) for client boundaries.
 
 ## Local connections
 

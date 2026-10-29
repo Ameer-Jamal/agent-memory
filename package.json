@@ -1,6 +1,6 @@
 {
   "name": "@ameer-jamal/agent-memory",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Shared Markdown memory for coding agents. Learn once, reuse across tools.",
   "type": "module",
   "bin": {
@@ -45,6 +45,15 @@
     "opencode",
     "copilot-cli",
     "windsurf",
-    "cline"
-  ]
+    "cline",
+    "mcp",
+    "model-context-protocol"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.4.0"
+  }
 }

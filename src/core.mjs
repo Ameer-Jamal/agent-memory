@@ -6,7 +6,7 @@ import { START, END, pointer, templates } from './templates.mjs';
 import { ADAPTERS, AGENTS, targets, executable } from './adapters.mjs';
 export { AGENTS, targets } from './adapters.mjs';
 
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 export const exists = p => fs.existsSync(p);
 const read = p => exists(p) ? fs.readFileSync(p, 'utf8') : null;
 const hash = s => crypto.createHash('sha256').update(s).digest('hex');

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { context, AGENTS, VERSION, detect, discoverObsidian, planSetup, install, planUninstall, uninstall, doctor, instructions, prepareTest, checkTest, cleanTest } from '../src/core.mjs';
 import { search, show, maintenance, previewMaintenance, applyMaintenance } from '../src/notebook.mjs';
@@ -15,6 +16,8 @@ const HELP = `
 
   setup                 Guided setup with a preview before writing
   ui                    Graphical setup, folder picker, diagnostics and tests
+  mcp                   Local MCP server (stdio); --allow-write enables capture
+  mcp-config            Print a local MCP connection block; no files changed
   doctor                Check files and show remaining manual steps (no AI calls)
   instructions [agent]  Print the shared pointer for an agent's global rules
   search "KEYWORDS"     Title-first lookup; at most 8 hits / 4,000 characters
@@ -46,6 +49,7 @@ const HELP = `
     --apply --plan ID   Apply a previously reviewed maintenance plan
     --path DIRECTORY   Project to connect or disconnect
     --live             Opt in to agent calls; may use provider credits
+    --allow-write      MCP: opt in to new inbox lessons only
     --no-open --port N UI: print local URL without opening; optional port
     --json              Machine-readable output; requires explicit setup options
     --help              Show help
@@ -64,7 +68,7 @@ const HELP = `
 function parse(argv) {
   const flags = {}, positional = [];
   const values = new Set(['memory-dir', 'notes-dir', 'agents', 'answer', 'agent', 'source', 'limit', 'start', 'lines', 'plan', 'path', 'port']);
-  const booleans = new Set(['allow-capture', 'upgrade-policy', 'dry-run', 'yes', 'json', 'help', 'version', 'archive-duplicates', 'reindex', 'apply', 'live', 'no-open']);
+  const booleans = new Set(['allow-capture', 'upgrade-policy', 'dry-run', 'yes', 'json', 'help', 'version', 'archive-duplicates', 'reindex', 'apply', 'live', 'no-open', 'allow-write']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '-h') { flags.help = true; continue; }
@@ -99,14 +103,28 @@ async function main() {
   if (flags.version) { console.log(VERSION); return; }
   if (flags.help || !positional.length) { console.log(HELP); return; }
   const [cmd, sub] = positional;
-  const commands = ['setup', 'ui', 'doctor', 'instructions', 'test', 'uninstall', 'search', 'show', 'maintain', 'project', 'verify'];
+  const commands = ['setup', 'ui', 'doctor', 'instructions', 'test', 'uninstall', 'search', 'show', 'maintain', 'project', 'verify', 'mcp', 'mcp-config'];
   if (!commands.includes(cmd)) throw new Error(`Unknown command: ${cmd}. Run agent-memory --help.`);
   if (positional.length > (['test', 'instructions', 'search', 'show', 'project'].includes(cmd) ? 2 : 1)) throw new Error('Unexpected extra arguments. Run agent-memory --help.');
   const setupOnly = ['memory-dir', 'notes-dir', 'agents', 'allow-capture', 'upgrade-policy'];
   if (cmd !== 'setup' && setupOnly.some(k => flags[k] !== undefined)) throw new Error('Folder, agent, and capture options belong to the setup command.');
   if (flags['dry-run'] && !['setup', 'uninstall', 'project', 'maintain'].includes(cmd)) throw new Error('--dry-run is supported for setup, project, maintenance and uninstall only.');
   if (flags.answer !== undefined && !(cmd === 'test' && sub === 'check')) throw new Error('--answer is supported for test check only.');
+  if (flags['allow-write'] && !['mcp', 'mcp-config'].includes(cmd)) throw new Error('--allow-write belongs to mcp or mcp-config only.');
+  if (['mcp', 'mcp-config'].includes(cmd) && Object.keys(flags).some(k => !['allow-write', ...(cmd === 'mcp-config' ? ['json'] : [])].includes(k))) throw new Error('Use mcp or mcp-config with --allow-write only (--json is accepted for mcp-config).');
   const ctx = context();
+  if (cmd === 'mcp-config') {
+    console.log(JSON.stringify({ mcpServers: { 'agent-memory': { command: process.execPath, args: [fileURLToPath(import.meta.url), 'mcp', ...(flags['allow-write'] ? ['--allow-write'] : [])], env: { AGENT_MEMORY_CONFIG_DIR: ctx.configDir } } } }, null, 2));
+    return;
+  }
+  if (cmd === 'mcp') {
+    if (flags.json || flags.yes || flags.live || flags.port || flags['no-open']) throw new Error('Use agent-memory mcp [--allow-write]; stdout is reserved for MCP.');
+    const { startMemoryMcp } = await import('../src/mcp.mjs');
+    const server = startMemoryMcp(ctx, { allowWrite: Boolean(flags['allow-write']) });
+    const stop = () => server.close().catch(() => { process.exitCode = 1; });
+    process.once('SIGINT', stop); process.once('SIGTERM', stop);
+    return;
+  }
   let rl;
   const ask = async (question, fallback = '') => {
     if (!process.stdin.isTTY || flags.json) throw new Error('This step needs input. Use explicit options and --yes, or run it in a terminal.');

@@ -9,7 +9,7 @@ npm install --global git+https://github.com/Ameer-Jamal/agent-memory.git
 agent-memory ui
 ```
 
-This installs the package directly from GitHub. There are no runtime dependencies, build step, API keys, or memory service to configure. Your selected agents need their own normal installation and login.
+This installs the package directly from GitHub. The package uses the official MCP SDK and Zod validation; there is no build step, API key, or hosted memory service to configure. Your selected agents need their own normal installation and login.
 
 The graphical setup includes folder selection, agent checkboxes, previews, and connection status. See [GUI guide](gui.md). For a terminal wizard, run `agent-memory setup`.
 

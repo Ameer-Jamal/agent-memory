@@ -53,6 +53,8 @@ This keeps requests bounded; it does not promise indexed search over millions of
 
 A new lesson should usually be under 200 words. Include the symptom, scope, fix or correction, and evidence. Save a link/source instead of copying an entire article, transcript, or log. Use one file per discovery and search for duplicates first. The rule is a policy for agents, not a hard filesystem quota.
 
+Before saving, compare likely existing lessons by meaning. When overlap is over 90%, scope is the same, and no useful information is added, reuse the existing note instead of creating another. Rewording is not a new lesson. Preserve important differences in environment, versions, fixes, or evidence as a concise addition linked to the prior note. The percentage is an agent judgment, not a computed similarity metric or an automatic filesystem gate. Exact-duplicate maintenance remains a separate operation.
+
 ## Existing installations
 
 Updating the CLI refreshes no personal files by itself. Run `agent-memory setup` to refresh managed pointers. To replace the old startup-loading policy, explicitly opt into:
