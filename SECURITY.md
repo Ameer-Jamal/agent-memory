@@ -22,7 +22,7 @@ This is a single-user local tool, not a security boundary for hostile shared dir
 
 Please use the repository's **Security → Report a vulnerability** flow for sensitive reports. Avoid posting secrets, config backups, or private memory in public issues. Include a minimal synthetic reproduction, affected version, platform, expected behavior, and potential impact.
 
-For ordinary bugs without sensitive information, use the bug report issue template. Version 0.1.x is the initial supported line.
+For ordinary bugs without sensitive information, use the bug report issue template. Report against your installed version, including whether MCP capture is enabled.
 
 ## Local graphical setup
 
@@ -31,3 +31,11 @@ The optional UI binds only to 127.0.0.1, uses a random per-run access token, rej
 ## Bounded retrieval and maintenance
 
 Search/show cap output and refuse linked/traversal paths; note content is still untrusted reference data. File/byte scan limits can produce partial results, which are explicitly reported. This is not a semantic search engine or secret scanner. Maintenance requires an explicit reviewed plan ID, archives exact duplicates instead of deleting them, preserves manual index text, and rejects stale previews. Same-title notes are only review candidates.
+
+## Local MCP server
+
+`agent-memory mcp` uses the official MCP SDK over stdio: a client launches a local child process; there is no listening HTTP port or hosted URL. Read-only is the default. `--allow-write` explicitly enables new files inside the configured memory inbox; there are no tool actions to edit/delete notes, change configs, or execute shell commands. Removing a client connection does not remove already saved notes.
+
+Capture requires a bounded duplicate preview and a second decision within 15 minutes. Revision checks reject changed notebook metadata/policy and concurrent captures, and new files use exclusive creation. The OS user and local directory remain the trust boundary; this is not protection from a hostile local process or abrupt power loss. Common credential patterns are rejected, but this is not a comprehensive secret scanner. Verification status and evidence come from the caller, not independent model/command verification. Semantic overlap is judged by the caller; no semantic classifier or API is invoked.
+
+Only connect trusted MCP hosts. A cloud-backed host can send returned note excerpts to its AI provider. MCP tool definitions also consume host context; the host controls discovery/caching. Current input/output bounds do not imply a total model-token limit.
