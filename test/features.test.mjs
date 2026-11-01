@@ -433,3 +433,30 @@ test('promote preview of a 240 KB note is fast', t => {
   write(path.join(root, 'inbox', 'big.md'), '# Big\n' + 'a.'.repeat(120000));
   const start = Date.now(); maintenance(ctx, { promote: 'inbox/big.md' }); assert.ok(Date.now() - start < 3000);
 });
+
+
+test('search preserves cheap title and prefix matches after exhausting the read budget', t => {
+  const { ctx, root } = fixture(t);
+  const body = '# Budget note\nA useful prefixneedle fact.\n' + 'x'.repeat(2200);
+  for (let i = 0; i < 4100; i++) write(path.join(root, 'topics', `budget-note-${String(i).padStart(4, '0')}.md`), body);
+  for (const [query, match] of [['budget note', 'title'], ['prefixneedle', 'text']]) {
+    const result = search(ctx, query);
+    assert.equal(result.hits.length, 8);
+    assert.equal(result.partial, true);
+    assert.ok(result.hits.every(hit => hit.match === match));
+    assert.ok(JSON.stringify(result).length <= 4000);
+  }
+});
+
+test('promotion filters every path component for both separator styles', t => {
+  const { ctx } = fixture(t);
+  for (const name of ['inbox/sub\\secrets.md', 'inbox/sub\\node_modules\\x.md']) {
+    assert.throws(() => maintenance(ctx, { promote: name }), /search skips/u, name);
+  }
+});
+
+test('credential reference exceptions match syntax rather than words inside literals', () => {
+  assert.equal(findSecret('password=Abc-env-123456'), 'password or key assignment');
+  for (const reference of ['process.env.PASSWORD', 'os.environ["PASSWORD"]', 'os.getenv("PASSWORD")', 'getPassword()'])
+    assert.equal(findSecret('password=' + reference), null, reference);
+});

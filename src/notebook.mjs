@@ -20,7 +20,7 @@ function literalAssignment(text) {
     const quoted = double ?? single, value = quoted ?? bare.replace(/[.,;]+$/u, '');
     if (value.length < 8 || /^[$<{%(]/u.test(value)) continue;
     if (quoted !== undefined) return true;
-    if (value.includes('(') || /(?:^|[^a-z])(?:env|environ|getenv)\b/iu.test(value)) continue;
+    if (/^(?:(?:process\.)?env\.|(?:os\.)?environ(?:\[|\.)|(?:os\.)?getenv\s*\(|[\w.]+\s*\()/u.test(value)) continue;
     // Words like "secret: required" are prose; weaker names need a digit or symbol alongside letters.
     if (/^(?:password|passwd|pwd|api|access)/iu.test(keyword) || (/[A-Za-z]/u.test(value) && /[\d!@#$%^&*+/=,]/u.test(value))) return true;
   }
@@ -114,23 +114,30 @@ export function search(ctx, query, { limit = 8, source = 'memory', now = Date.no
     scanned++;
     const fields = fieldsOf(`${name} ${heading}`, text), tf = terms.map(t => weighted(fields, t));
     tf.forEach((n, i) => { if (n > 0) df[i]++; });
-    (tf.every(n => n > 0) ? candidates : deferred).push({ file, name, heading });
+    const item = { file, name, heading };
+    if (tf.every(n => n > 0)) candidates.push({ ...item, text, tf, length: Math.max(1, text.split(/\s+/u).length), titleHit: terms.every(t => fields.title.includes(t)) });
+    else deferred.push(item);
   }
-  const docs = []; let totalLength = 0, deepCount = 0;
+  // A deep read enriches an existing match; it must never be required to return
+  // a title/prefix match already found within the shared I/O budget.
+  const docs = new Map(candidates.map(item => [item.file, item]));
+  let totalLength = candidates.reduce((sum, item) => sum + item.length, 0), deepCount = candidates.length;
   const deep = item => {
     const text = head(item.file, budget), fields = fieldsOf(`${item.name} ${item.heading}`, text), tf = terms.map(t => weighted(fields, t)), length = Math.max(1, text.split(/\s+/u).length);
-    totalLength += length; deepCount++;
-    if (tf.every(n => n > 0)) docs.push({ ...item, text, tf, length, titleHit: terms.every(t => fields.title.includes(t)) });
+    const previous = docs.get(item.file);
+    if (previous && text.length < previous.text.length) return;
+    totalLength += length - (previous?.length || 0); if (!previous) deepCount++;
+    if (tf.every(n => n > 0)) docs.set(item.file, { ...item, text, tf, length, titleHit: terms.every(t => fields.title.includes(t)) });
   };
   for (const item of candidates) { if (!budget.remaining) { partial = true; break; } deep(item); }
   for (const item of deferred) {
-    if (docs.length >= limit) break;
+    if (docs.size >= limit) break;
     if (!budget.remaining) { partial = true; break; }
     deep(item);
   }
   // BM25 over weighted fields (title > tags > headings > body), AND semantics, mild recency boost.
   const average = totalLength / Math.max(1, deepCount), idf = df.map(n => Math.log(1 + (scanned - n + 0.5) / (n + 0.5)));
-  const matches = docs.map(d => {
+  const matches = [...docs.values()].map(d => {
     const bm25 = d.tf.reduce((sum, f, i) => sum + idf[i] * f * (BM25_K1 + 1) / (f + BM25_K1 * (1 - BM25_B + BM25_B * d.length / average)), 0);
     const age = Math.max(0, now - fs.statSync(d.file).mtimeMs) / 86400000;
     const score = bm25 * (1 + RECENCY * Math.max(0, 1 - age / 365));
@@ -197,7 +204,7 @@ export function maintenance(ctx, { archiveDuplicates = false, reindex = false, p
   }
   if (promote !== undefined) {
     if (typeof promote !== 'string' || !promote.startsWith('inbox/') || !promote.endsWith('.md') || path.isAbsolute(promote) || promote.split(/[\\/]/u).some(s => !s || s.startsWith('.'))) throw new Error('Choose a visible Markdown note inside inbox/ to promote.');
-    if (promote.split('/').some(seg => SENSITIVE.test(seg) || OMIT.has(seg))) throw new Error('Not promoting: search skips this name (secret/password/credential/private-key or tooling folders). Rename the inbox note first.');
+    if (promote.split(/[\\/]/u).some(seg => SENSITIVE.test(seg) || OMIT.has(seg))) throw new Error('Not promoting: search skips this name (secret/password/credential/private-key or tooling folders). Rename the inbox note first.');
     const from = path.resolve(root, promote);
     if (!from.startsWith(path.join(root, 'inbox') + path.sep)) throw new Error('Choose a visible Markdown note inside inbox/ to promote.');
     noLink(path.join(root, 'inbox')); noLink(from);

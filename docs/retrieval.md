@@ -45,7 +45,7 @@ Other platforms can use their file-search tools with the same limits. Never use 
 
 ## Local I/O bounds
 
-The built-in search scans at most 10,000 Markdown files across topics/inbox, has an 8 MiB read budget, and reads bounded prefixes of individual files. Every note's first 2 KiB is checked cheaply; likely matches then get a deeper read of up to 64 KiB for ranking. It skips linked paths, hidden/editor metadata, archive directories, and obviously sensitive filenames. A result explicitly marks a partial scan; no match is not proof that the entire notebook lacks the fact.
+The built-in search scans at most 10,000 Markdown files across topics/inbox, has an 8 MiB read budget, and reads bounded prefixes of individual files. Within the shared budget, each note's first 2 KiB is checked cheaply; likely matches then get a deeper read of up to 64 KiB for ranking. Matches already found in a title or prefix remain available even if the deeper-read budget is exhausted. It skips linked paths, hidden/editor metadata, archive directories, and obviously sensitive filenames. A result explicitly marks a partial scan; no match is not proof that the entire notebook lacks the fact.
 
 This keeps requests bounded; it does not promise indexed search over millions of books. For a very large collection, narrow the notes source and use a targeted local grep to follow a specific lead. There is no persistent content index or embeddings service in this release.
 
