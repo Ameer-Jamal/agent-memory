@@ -3,8 +3,8 @@
 ## Unreleased
 
 - Search ranking: deterministic BM25-style term weighting with title/path, tag and heading boosts and a mild (up to 10%) recency boost from file modification time. All terms must still match; the 8-hit and 4,000-character caps are unchanged. Each note is now read (bounded prefix, shared 8 MiB budget) rather than title-first, so very large notebooks may report a partial scan sooner.
-- Capture guardrails: `memory_remember` refuses more credential shapes (private keys, AWS access keys, common API/JWT/bearer tokens, URLs with passwords, secret-named assignments) without echoing the value, and previews same-scope word-overlap matches. A `save_new` over a same-scope note with at least 90% word overlap and identical numbers/versions is reused instead of duplicated; `save_difference` keeps a deliberate addition.
-- `agent-memory maintain --promote inbox/NOTE.md` previews moving a vetted inbox note to `topics/`, using the existing reviewed-plan apply flow. Refuses traversal, links, credential-like content, name collisions, and notes changed after preview. Not exposed through MCP.
+- Capture guardrails: `memory_remember` refuses more credential shapes (private keys, AWS access keys, common API/JWT/bearer tokens, URLs with passwords, secret-named assignments) without echoing the value, and previews same-scope word-overlap matches. Overlap is advisory; only exact generated duplicates are automatically reused. Numeric hints preserve version punctuation and order, and changed facts/metadata remain savable.
+- `agent-memory maintain --promote inbox/NOTE.md` previews moving a vetted inbox note to `topics/`, using the existing reviewed-plan apply flow. Refuses traversal, links, credential-like content, name collisions, and notes changed after preview. Not exposed through MCP. Apply verifies plan integrity and canonical containment; combined promotion/reindex uses the destination path. Maintenance summary paths use forward slashes on every platform.
 
 ## 0.3.0 — 2026-10-29
 

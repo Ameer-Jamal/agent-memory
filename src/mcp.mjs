@@ -61,9 +61,10 @@ function validateLesson(lesson) {
 const words = text => new Set(text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
 const unscoped = text => text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/u, '').replace(/^Related lesson:.*$/gmu, '');
 const scopeOf = text => { const raw = text.match(/^scope:\s*(.+)$/mu)?.[1]?.trim(); try { return raw?.startsWith('"') ? JSON.parse(raw) : raw; } catch { return raw; } };
-// Deterministic lexical overlap (Jaccard over words) with same-scope notes. Differing numbers/versions are never treated as duplicates.
+// Advisory lexical overlap only: word sets cannot establish equivalent facts.
+const numericTokens = text => (text.toLowerCase().match(/[\p{L}\p{N}]+(?:[._+\/-][\p{L}\p{N}]+)*/gu) || []).filter(w => /\d/u.test(w)).join(' ');
 function overlaps(c, lesson, content) {
-  const mine = words(unscoped(content)), numbers = set => [...set].filter(w => /\d/u.test(w)).sort().join(' ');
+  const mine = words(unscoped(content)), numbers = numericTokens(unscoped(content));
   const recent = c.entries.filter(([, size]) => size <= 16000).sort((a, b) => b[2] - a[2] || a[0].localeCompare(b[0])).slice(0, 300);
   const found = [];
   for (const [name] of recent) {
@@ -72,7 +73,7 @@ function overlaps(c, lesson, content) {
     if (scopeOf(text)?.toLowerCase() !== lesson.scope.toLowerCase()) continue;
     const theirs = words(unscoped(text)), shared = [...mine].filter(w => theirs.has(w)).length;
     const overlap = Math.round(shared / (mine.size + theirs.size - shared) * 100) / 100;
-    if (overlap >= 0.5) found.push({ path: name, overlap, same_numbers: numbers(mine) === numbers(theirs) });
+    if (overlap >= 0.5) found.push({ path: name, overlap, same_numbers: numbers === numericTokens(unscoped(text)) });
   }
   return found.sort((a, b) => b.overlap - a.overlap || a.path.localeCompare(b.path)).slice(0, 3);
 }
@@ -128,7 +129,7 @@ export function createMemoryTools(ctx, { allowWrite = false, now = Date.now } = 
           for (const [key, value] of reviews) if (now() - value.created > 15 * 60000) reviews.delete(key);
           if (reviews.size >= 20) throw new Error('Too many pending lessons; finish a preview or restart this server.');
           const similar = overlaps(c, args.lesson, renderLesson(args.lesson, '', ''));
-          reviews.set(review_id, { lesson: args.lesson, candidates: [...new Set([...found.hits.map(hit => hit.path), ...similar.map(o => o.path)])], similar, revision: c.revision, created: now() });
+          reviews.set(review_id, { lesson: args.lesson, candidates: [...new Set([...found.hits.map(hit => hit.path), ...similar.map(o => o.path)])], revision: c.revision, created: now() });
           const preview = { status: 'review_required', review_id, candidates: found.hits, ...(similar.length && { overlaps: similar }), partial: c.partial || found.partial, guidance: 'Inspect likely matches with memory_read; refine search if needed. Over 90% meaning overlap, same scope, and no useful new information: reuse_existing with existing_path. Otherwise save_new, or save_difference with a related note. Preview is valid for 15 minutes and unchanged memory only.' };
           while (JSON.stringify(preview).length > 4000 && preview.candidates.length) { preview.candidates.pop(); preview.outputTruncated = true; }
           return preview;
@@ -150,11 +151,6 @@ export function createMemoryTools(ctx, { allowWrite = false, now = Date.now } = 
           const file = path.join(c.state.memoryDir, 'inbox', name); noLink(file);
           const content = renderLesson(review.lesson, date.slice(0, 10), related);
           if (content.split(/\s+/u).length > 200) throw new Error('Generated lesson exceeds 200 words; shorten the preview input.');
-          const near = review.similar.find(o => o.overlap >= 0.9 && o.same_numbers);
-          if (args.decision === 'save_new' && near) {
-            reviews.delete(args.review_id);
-            return { status: 'reused', path: near.path, saved: false, reason: `Same-scope note with ${Math.round(near.overlap * 100)}% word overlap and identical numbers/versions already exists. Use save_difference to keep a deliberate addition.` };
-          }
           // Deterministic duplicate guard among bounded preview candidates; no semantic score is invented.
           const withoutDate = s => s.replace(/^last_verified:.*$/mu, 'last_verified:');
           for (const candidate of review.candidates) {

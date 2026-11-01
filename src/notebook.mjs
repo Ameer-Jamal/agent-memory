@@ -12,11 +12,20 @@ const SECRET_PATTERNS = [
   ['API token', /\b(?:ghp_|gho_|ghs_|github_pat_|sk-proj-|sk-ant-|xox[abprs]-)[A-Za-z0-9_-]{10,}|\bsk-[A-Za-z0-9]{32,}|\bAIza[0-9A-Za-z_-]{35}\b|\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/u],
   ['bearer token', /\bBearer\s+[A-Za-z0-9._~+/-]{20,}=*/u],
   ['URL with embedded password', /https?:\/\/[^\s/:@]+:[^\s/@]+@/u],
-  // A secret-like name assigned a 8+ character literal that has a digit or symbol; env references and placeholders are ignored.
-  ['password or key assignment', /\b[\w.-]*(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key|token)[\w.-]*["']?\s*[:=]\s*["']?(?![$<{%(])(?=[^\s"']*[\d!@#$%^&*+/=])[^\s"']{8,}/iu],
 ];
+const SECRET_ASSIGNMENT = /\b[\w.-]*(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key|token)[\w.-]*["']?\s*[:=]\s*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^\s"']+))/giu;
 /** Returns the kind of credential the text appears to contain, or null. Not a complete secret scanner. */
-export function findSecret(text) { return SECRET_PATTERNS.find(([, re]) => re.test(text))?.[0] ?? null; }
+export function findSecret(text) {
+  const kind = SECRET_PATTERNS.find(([, re]) => re.test(text))?.[0];
+  if (kind) return kind;
+  for (const match of text.matchAll(SECRET_ASSIGNMENT)) {
+    // Quoted literals may include spaces/punctuation. Strip sentence endings only
+    // from unquoted values so prose like "token: expired," is not a credential.
+    const value = match[1] ?? match[2] ?? match[3].replace(/[.,;]+$/u, '');
+    if (value.length >= 8 && !/^[$<{%(]/u.test(value)) return 'password or key assignment';
+  }
+  return null;
+}
 
 export function notebook(ctx) {
   const state = load(ctx);
@@ -187,15 +196,16 @@ export function maintenance(ctx, { archiveDuplicates = false, reindex = false, p
     const startMarker = '<!-- agent-memory:shelf:start -->', endMarker = '<!-- agent-memory:shelf:end -->';
     const start = before.indexOf(startMarker), end = before.indexOf(endMarker);
     if ((start >= 0) !== (end >= 0) || (start >= 0 && end < start)) throw new Error('The generated shelf markers in INDEX.md need repair.');
-    const archived = new Set(actions.map(a => a.from));
-    const shelf = notes.filter(n => !archived.has(n.file)).slice(0, 50).map(n => `- ${n.title.replace(/[<>]/gu, '')} — ${path.relative(root, n.file).replaceAll('\\', '/')}`).join('\n');
+    const archived = new Set(actions.filter(a => a.type === 'archive').map(a => a.from));
+    const promoted = new Map(actions.filter(a => a.type === 'promote').map(a => [a.from, a.to]));
+    const shelf = notes.filter(n => !archived.has(n.file)).slice(0, 50).map(n => `- ${n.title.replace(/[<>]/gu, '')} — ${path.relative(root, promoted.get(n.file) || n.file).replaceAll('\\', '/')}`).join('\n');
     const block = `${startMarker}\n## Generated shelf (up to 50 titles; search for more)\n${shelf}\n${endMarker}`;
     const after = start >= 0 ? before.slice(0, start) + block + before.slice(end + endMarker.length) : before + '\n' + block + '\n';
     if (before !== after) actions.push({ type: 'index', file, digest: hash(before), before, after });
   }
   const plan = { root, actions, createdAt: now.toISOString() };
   plan.id = hash(JSON.stringify(plan)).slice(0, 16);
-  const summary = { planId: plan.id, scanned: notes.length, partial: scanPartial || budget.partial, duplicates: duplicates.slice(0, 20).map(g => g.slice(0, 8).map(n => path.relative(root, n.file))), stale: stale.slice(0, 20), possibleConflicts: [...titles.values()].filter(g => new Set(g.map(n => n.digest)).size > 1).slice(0, 10).map(g => g.slice(0, 8).map(n => path.relative(root, n.file))), actions: actions.map(a => ({ type: a.type, path: path.relative(root, a.from || a.file) })), actionCount: actions.length, note: 'Exact duplicates only. Same-title notes are review candidates, not proven contradictions. Nothing changes until explicitly applied.' };
+  const summary = { planId: plan.id, scanned: notes.length, partial: scanPartial || budget.partial, duplicates: duplicates.slice(0, 20).map(g => g.slice(0, 8).map(n => path.relative(root, n.file))), stale: stale.slice(0, 20), possibleConflicts: [...titles.values()].filter(g => new Set(g.map(n => n.digest)).size > 1).slice(0, 10).map(g => g.slice(0, 8).map(n => path.relative(root, n.file))), actions: actions.map(a => ({ type: a.type, path: path.relative(root, a.from || a.file).replaceAll('\\', '/') })), actionCount: actions.length, note: 'Exact duplicates only. Same-title notes are review candidates, not proven contradictions. Nothing changes until explicitly applied.' };
   while (JSON.stringify(summary).length > 8000) {
     const key = ['duplicates', 'stale', 'possibleConflicts', 'actions'].sort((a, b) => JSON.stringify(summary[b]).length - JSON.stringify(summary[a]).length)[0];
     summary[key].pop(); summary.outputTruncated = true;
@@ -212,10 +222,16 @@ export function applyMaintenance(ctx, id) {
     if (fs.existsSync(path.join(ctx.configDir, 'probe.json'))) throw new Error('Clean the active memory test before maintaining notes.');
     const state = notebook(ctx), plan = JSON.parse(read(path.join(ctx.configDir, 'maintenance-plan.json')) || '{}');
     if (!id || plan.id !== id || plan.root !== state.memoryDir || !Array.isArray(plan.actions)) throw new Error('Preview maintenance first and use its exact plan ID.');
-    const inside = p => typeof p === 'string' && p.startsWith(state.memoryDir + path.sep);
+    const { id: storedId, ...payload } = plan;
+    if (hash(JSON.stringify(payload)).slice(0, 16) !== storedId) throw new Error('Maintenance plan changed; preview again and use its exact plan ID.');
+    const inside = (p, folder = state.memoryDir) => {
+      if (typeof p !== 'string' || p !== path.resolve(p)) return false;
+      const relative = path.relative(folder, p);
+      return relative !== '' && !path.isAbsolute(relative) && !relative.split(path.sep).some(s => s.startsWith('.'));
+    };
     for (const a of plan.actions) {
       const target = { archive: '.archive', promote: 'topics' }[a.type];
-      if (!['archive', 'index', 'promote'].includes(a.type) || !inside(a.from || a.file) || (target && (!inside(a.to) || !a.to.startsWith(path.join(state.memoryDir, target) + path.sep))) || (a.type === 'promote' && !a.from.startsWith(path.join(state.memoryDir, 'inbox') + path.sep))) throw new Error('Unexpected maintenance path.');
+      if (!['archive', 'index', 'promote'].includes(a.type) || !inside(a.from || a.file) || (target && !inside(a.to, path.join(state.memoryDir, target))) || (a.type === 'index' && a.file !== path.join(state.memoryDir, 'INDEX.md')) || (a.type === 'promote' && (!inside(a.from, path.join(state.memoryDir, 'inbox')) || !a.from.endsWith('.md') || a.to !== path.join(state.memoryDir, 'topics', path.basename(a.from))))) throw new Error('Unexpected maintenance path.');
       noLink(a.from || a.file); if (a.to) noLink(a.to);
       if (hash(read(a.from || a.file) || '') !== a.digest) throw new Error('A note changed since the preview. Preview again before applying.');
       if (a.to && fs.existsSync(a.to)) throw new Error('A destination file already exists; no files were changed.');

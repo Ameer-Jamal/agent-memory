@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { context, install, planSetup, uninstall, targets, load, read, doctor, prepareTest, checkTest, cleanTest, probe } from '../src/core.mjs';
+import { context, install, planSetup, uninstall, targets, load, read, doctor, prepareTest, checkTest, cleanTest, probe, hash } from '../src/core.mjs';
 import { ADAPTERS, AGENTS } from '../src/adapters.mjs';
 import { pointer, templates } from '../src/templates.mjs';
 import { search, show, walkMarkdown, maintenance, previewMaintenance, applyMaintenance } from '../src/notebook.mjs';
@@ -363,4 +363,41 @@ test('CLI promote previews without changing notes and the MCP server exposes no 
   assert.ok(fs.existsSync(path.join(root, 'inbox', 'x.md'))); assert.equal(fs.existsSync(path.join(root, 'topics', 'x.md')), false);
   const bad = spawnSync(process.execPath, [cli, 'maintain', '--promote', '../x.md', '--dry-run'], { env, encoding: 'utf8' });
   assert.notEqual(bad.status, 0); assert.ok(fs.existsSync(path.join(root, 'inbox', 'x.md')));
+});
+
+
+test('promote and reindex retain the promoted title at its destination', t => {
+  const { ctx, root } = fixture(t);
+  write(path.join(root, 'inbox', 'runner.md'), '# Unique promoted runner\nUse Java 21.\n');
+  const preview = previewMaintenance(ctx, { promote: 'inbox/runner.md', reindex: true });
+  applyMaintenance(ctx, preview.planId);
+  const index = read(path.join(root, 'INDEX.md'));
+  assert.ok(index.includes('Unique promoted runner — topics/runner.md'));
+  assert.ok(!index.includes('inbox/runner.md'));
+  assert.ok(fs.existsSync(path.join(root, 'topics', 'runner.md')));
+});
+
+test('promotion apply rejects edited plans and traversal even with a recomputed ID', t => {
+  const { ctx, root, base } = fixture(t);
+  write(path.join(root, 'inbox', 'safe.md'), '# Safe');
+  const preview = previewMaintenance(ctx, { promote: 'inbox/safe.md' });
+  const planFile = path.join(ctx.configDir, 'maintenance-plan.json'), original = JSON.parse(read(planFile));
+  const edit = (mutate, rehash) => {
+    const plan = structuredClone(original); mutate(plan.actions[0]);
+    if (rehash) { const { id, ...payload } = plan; plan.id = hash(JSON.stringify(payload)).slice(0, 16); }
+    write(planFile, JSON.stringify(plan));
+    assert.throws(() => applyMaintenance(ctx, plan.id), /Unexpected maintenance path|exact plan ID/u);
+    assert.ok(fs.existsSync(path.join(root, 'inbox', 'safe.md')));
+  };
+  edit(a => { a.to = path.join(root, 'topics', 'different.md'); }, false);
+  for (const rehash of [false, true]) {
+    edit(a => { a.to = root + path.sep + ['topics', '..', '..', '..', 'escaped.md'].join(path.sep); }, rehash);
+    edit(a => { a.from = root + path.sep + ['inbox', '..', 'topics', 'safe.md'].join(path.sep); }, rehash);
+    edit(a => { a.to = path.join(base, 'escaped.md'); }, rehash);
+  }
+  assert.ok(!fs.existsSync(path.join(base, 'escaped.md')));
+  assert.ok(!fs.existsSync(path.join(root, 'topics', 'different.md')));
+  write(planFile, JSON.stringify(original));
+  applyMaintenance(ctx, preview.planId);
+  assert.ok(fs.existsSync(path.join(root, 'topics', 'safe.md')));
 });

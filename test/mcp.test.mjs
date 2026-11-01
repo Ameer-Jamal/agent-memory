@@ -163,15 +163,15 @@ test('secrets scan does not flag ordinary prose, placeholders or short values', 
   for (const fix of fixes) assert.equal(tools.memory_remember.run({ lesson: { ...lesson, fix } }).status, 'review_required', fix);
 });
 
-test('preview surfaces same-scope overlap and save_new reuses a near-duplicate', t => {
+test('preview surfaces advisory same-scope overlap without overriding save_new', t => {
   const { ctx, root } = fixture(t), tools = createMemoryTools(ctx, { allowWrite: true });
   const a = tools.memory_remember.run({ lesson }); assert.equal(a.overlaps, undefined);
   const first = tools.memory_remember.run({ review_id: a.review_id, decision: 'save_new' });
   const reworded = { ...lesson, evidence: lesson.evidence + ' Checked.' };
   const b = tools.memory_remember.run({ lesson: reworded });
   assert.equal(b.overlaps[0].path, first.path); assert.ok(b.overlaps[0].overlap >= 0.9, JSON.stringify(b.overlaps));
-  const reused = tools.memory_remember.run({ review_id: b.review_id, decision: 'save_new' });
-  assert.equal(reused.status, 'reused'); assert.equal(reused.path, first.path); assert.equal(noteCount(root), 1);
+  const saved = tools.memory_remember.run({ review_id: b.review_id, decision: 'save_new' });
+  assert.equal(saved.status, 'saved'); assert.notEqual(saved.path, first.path); assert.equal(noteCount(root), 2);
 });
 
 test('overlap check keeps different scopes, changed versions and deliberate differences', t => {
@@ -188,4 +188,46 @@ test('overlap check keeps different scopes, changed versions and deliberate diff
   const same = tools.memory_remember.run({ lesson: { ...lesson, fix: 'Use the documented Java 21 environment for the runner.' } });
   assert.equal(tools.memory_remember.run({ review_id: same.review_id, decision: 'save_difference', existing_path: same.overlaps[0].path }).saved, true);
   assert.equal(noteCount(root), 4);
+});
+
+
+test('high lexical overlap preserves negation, version structure and changed metadata', t => {
+  const { ctx, root } = fixture(t), tools = createMemoryTools(ctx, { allowWrite: true });
+  const original = { ...lesson, fix: 'Use runtime 1.2 for the documented runner setup.' };
+  const save = value => {
+    const preview = tools.memory_remember.run({ lesson: value });
+    const result = tools.memory_remember.run({ review_id: preview.review_id, decision: 'save_new' });
+    assert.equal(result.status, 'saved');
+    return preview;
+  };
+  save(original);
+  const version = save({ ...original, fix: original.fix.replace('1.2', '2.1') });
+  assert.equal(version.overlaps[0].same_numbers, false);
+  save({ ...original, fix: 'Do not ' + original.fix });
+  save({ ...original, status: 'verified' });
+  save({ ...original, source: 'New independent review evidence' });
+  assert.equal(noteCount(root), 5);
+});
+
+test('real stdio capture refuses alphabetic credentials and preserves changed versions', async t => {
+  const { home, ctx } = fixture(t);
+  const env = { ...process.env, HOME: home, USERPROFILE: home, AGENT_MEMORY_CONFIG_DIR: ctx.configDir };
+  const transport = new StdioClientTransport({ command: process.execPath, args: [cli, 'mcp', '--allow-write'], env, stderr: 'pipe' });
+  const client = new Client({ name: 'capture-regression', version: '1' });
+  t.after(() => client.close());
+  await client.connect(transport);
+  for (const fix of ['password="correcthorsebatterystaple"', 'api_key=alphabeticliteral', 'password: alphabeticliteral', 'password=abcd,efgh', 'password="long pass phrase"']) {
+    const result = await client.callTool({ name: 'memory_remember', arguments: { lesson: { ...lesson, fix } } });
+    assert.equal(result.isError, true);
+    assert.ok(!JSON.stringify(result).includes('alphabeticliteral'));
+    assert.ok(!JSON.stringify(result).includes('correcthorsebatterystaple'));
+  }
+  for (const fix of ['Use runtime 1.2 for the runner.', 'Use runtime 2.1 for the runner.']) {
+    const preview = await client.callTool({ name: 'memory_remember', arguments: { lesson: { ...lesson, fix } } });
+    assert.ok(!preview.isError, JSON.stringify(preview));
+    const { review_id } = JSON.parse(preview.content[0].text);
+    const saved = await client.callTool({ name: 'memory_remember', arguments: { review_id, decision: 'save_new' } });
+    assert.ok(!saved.isError, JSON.stringify(saved));
+    assert.equal(JSON.parse(saved.content[0].text).status, 'saved');
+  }
 });
