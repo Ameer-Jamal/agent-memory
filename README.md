@@ -187,6 +187,7 @@ MCP does not run a background learner, invoke a model, collect chat transcripts,
 | `agent-memory verify --agent opencode --live` | Explicitly opt into fresh agent calls |
 | `agent-memory project add --path "/your/project"` | Connect a personal project; notes stay outside it |
 | `agent-memory maintain --reindex` | Preview a refreshed title shelf and review findings |
+| `agent-memory maintain --promote inbox/NOTE.md` | Preview moving a vetted inbox note to topics/ (apply with `--apply --plan ID`) |
 | `agent-memory doctor` | Configuration health and manual steps |
 | `agent-memory instructions cursor` | Print the pointer to paste into Cursor User Rules |
 | `agent-memory test` | Prepare a private discovery/capture challenge |
