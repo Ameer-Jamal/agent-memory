@@ -5,7 +5,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
 import { context, VERSION, doctor, hash, load, lock, noLink } from './core.mjs';
-import { search, show, walkMarkdown, findSecret } from './notebook.mjs';
+import { search, show, walkMarkdown, findSecret, cmp } from './notebook.mjs';
 
 const text = (max = 600) => z.string().trim().min(1).max(max);
 const lessonSchema = z.object({
@@ -60,12 +60,13 @@ function validateLesson(lesson) {
 }
 const words = text => new Set(text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
 const unscoped = text => text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/u, '').replace(/^Related lesson:.*$/gmu, '');
-const scopeOf = text => { const raw = text.match(/^scope:\s*(.+)$/mu)?.[1]?.trim(); try { return raw?.startsWith('"') ? JSON.parse(raw) : raw; } catch { return raw; } };
+const metaOf = (text, key) => { const raw = text.match(new RegExp(`^${key}:\\s*(.+)$`, 'mu'))?.[1]?.trim(); try { return raw?.startsWith('"') ? JSON.parse(raw) : raw; } catch { return raw; } };
+const scopeOf = text => metaOf(text, 'scope');
 // Advisory lexical overlap only: word sets cannot establish equivalent facts.
 const numericTokens = text => (text.toLowerCase().match(/[\p{L}\p{N}]+(?:[._+\/-][\p{L}\p{N}]+)*/gu) || []).filter(w => /\d/u.test(w)).join(' ');
 function overlaps(c, lesson, content) {
   const mine = words(unscoped(content)), numbers = numericTokens(unscoped(content));
-  const recent = c.entries.filter(([, size]) => size <= 16000).sort((a, b) => b[2] - a[2] || a[0].localeCompare(b[0])).slice(0, 300);
+  const recent = c.entries.filter(([, size]) => size <= 16000).sort((a, b) => b[2] - a[2] || cmp(a[0], b[0])).slice(0, 300);
   const found = [];
   for (const [name] of recent) {
     const file = path.join(c.state.memoryDir, name); noLink(file);
@@ -73,9 +74,9 @@ function overlaps(c, lesson, content) {
     if (scopeOf(text)?.toLowerCase() !== lesson.scope.toLowerCase()) continue;
     const theirs = words(unscoped(text)), shared = [...mine].filter(w => theirs.has(w)).length;
     const overlap = Math.round(shared / (mine.size + theirs.size - shared) * 100) / 100;
-    if (overlap >= 0.5) found.push({ path: name, overlap, same_numbers: numbers === numericTokens(unscoped(text)) });
+    if (overlap >= 0.5) found.push({ path: name, overlap, same_numbers: numbers === numericTokens(unscoped(text)), same_status: metaOf(text, 'status') === lesson.status, same_source: metaOf(text, 'source') === lesson.source });
   }
-  return found.sort((a, b) => b.overlap - a.overlap || a.path.localeCompare(b.path)).slice(0, 3);
+  return found.sort((a, b) => b.overlap - a.overlap || cmp(a.path, b.path)).slice(0, 3);
 }
 function relatedNote(ctx, relative, expectedScope) {
   const c = catalog(ctx);

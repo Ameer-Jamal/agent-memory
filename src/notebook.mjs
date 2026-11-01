@@ -13,18 +13,23 @@ const SECRET_PATTERNS = [
   ['bearer token', /\bBearer\s+[A-Za-z0-9._~+/-]{20,}=*/u],
   ['URL with embedded password', /https?:\/\/[^\s/:@]+:[^\s/@]+@/u],
 ];
-const SECRET_ASSIGNMENT = /\b[\w.-]*(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key|token)[\w.-]*["']?\s*[:=]\s*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^\s"']+))/giu;
+// A secret-like name assigned a literal of 8+ characters. Anchored on the keyword with a bounded suffix, so scanning is linear.
+const ASSIGNMENT = /(password|passwd|pwd|secret|api[_-]?key|access[_-]?key|token)[\w.-]{0,40}["']?[ \t]*[:=][ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^\s"']+))/giu;
+function literalAssignment(text) {
+  for (const [, keyword, double, single, bare] of text.matchAll(ASSIGNMENT)) {
+    const quoted = double ?? single, value = quoted ?? bare.replace(/[.,;]+$/u, '');
+    if (value.length < 8 || /^[$<{%(]/u.test(value)) continue;
+    if (quoted !== undefined) return true;
+    if (value.includes('(') || /(?:^|[^a-z])(?:env|environ|getenv)\b/iu.test(value)) continue;
+    // Words like "secret: required" are prose; weaker names need a digit or symbol alongside letters.
+    if (/^(?:password|passwd|pwd|api|access)/iu.test(keyword) || (/[A-Za-z]/u.test(value) && /[\d!@#$%^&*+/=,]/u.test(value))) return true;
+  }
+  return false;
+}
 /** Returns the kind of credential the text appears to contain, or null. Not a complete secret scanner. */
 export function findSecret(text) {
-  const kind = SECRET_PATTERNS.find(([, re]) => re.test(text))?.[0];
-  if (kind) return kind;
-  for (const match of text.matchAll(SECRET_ASSIGNMENT)) {
-    // Quoted literals may include spaces/punctuation. Strip sentence endings only
-    // from unquoted values so prose like "token: expired," is not a credential.
-    const value = match[1] ?? match[2] ?? match[3].replace(/[.,;]+$/u, '');
-    if (value.length >= 8 && !/^[$<{%(]/u.test(value)) return 'password or key assignment';
-  }
-  return null;
+  const hit = SECRET_PATTERNS.find(([, re]) => re.test(text))?.[0];
+  return hit ?? (literalAssignment(text) ? 'password or key assignment' : null);
 }
 
 export function notebook(ctx) {
@@ -71,6 +76,7 @@ function head(file, budget, maximum = 65536) {
 function title(text, file) { return (text.match(/^#\s+(.+)$/mu)?.[1] || path.basename(file, '.md')).slice(0, 160); }
 const BM25_K1 = 1.2, BM25_B = 0.75, RECENCY = 0.1;
 const FIELD_WEIGHT = { title: 3, tags: 2, headings: 1.5, body: 1 };
+export const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const count = (text, term) => text.split(term).length - 1;
 function fieldsOf(shelf, text) {
   const front = text.match(/^---\r?\n([\s\S]*?)\r?\n---/u)?.[1] || '';
@@ -99,19 +105,31 @@ export function search(ctx, query, { limit = 8, source = 'memory', now = Date.no
     files.push(...result.files); partial ||= result.partial;
   }
   const budget = { remaining: 8 * 1024 * 1024, partial: false };
-  const docs = [], df = terms.map(() => 0); let scanned = 0, totalLength = 0;
+  const weighted = (fields, term) => Object.entries(FIELD_WEIGHT).reduce((sum, [f, w]) => sum + w * count(fields[f], term), 0);
+  const df = terms.map(() => 0), candidates = [], deferred = []; let scanned = 0;
+  // Cheap pass over every file: name, heading and a 2 KiB prefix. Deep reads are limited to likely matches.
   for (const file of files) {
     if (!budget.remaining) { partial = true; break; }
-    const text = head(file, budget), name = path.relative(root, file).replaceAll('\\', '/'), heading = title(text, file);
+    const text = head(file, budget, 2048), name = path.relative(root, file).replaceAll('\\', '/'), heading = title(text, file);
     scanned++;
-    const fields = fieldsOf(`${name} ${heading}`, text), length = Math.max(1, text.split(/\s+/u).length);
-    totalLength += length;
-    const tf = terms.map(t => Object.entries(FIELD_WEIGHT).reduce((sum, [f, w]) => sum + w * count(fields[f], t), 0));
+    const fields = fieldsOf(`${name} ${heading}`, text), tf = terms.map(t => weighted(fields, t));
     tf.forEach((n, i) => { if (n > 0) df[i]++; });
-    if (tf.every(n => n > 0)) docs.push({ file, name, heading, text, tf, length, titleHit: terms.every(t => fields.title.includes(t)) });
+    (tf.every(n => n > 0) ? candidates : deferred).push({ file, name, heading });
+  }
+  const docs = []; let totalLength = 0, deepCount = 0;
+  const deep = item => {
+    const text = head(item.file, budget), fields = fieldsOf(`${item.name} ${item.heading}`, text), tf = terms.map(t => weighted(fields, t)), length = Math.max(1, text.split(/\s+/u).length);
+    totalLength += length; deepCount++;
+    if (tf.every(n => n > 0)) docs.push({ ...item, text, tf, length, titleHit: terms.every(t => fields.title.includes(t)) });
+  };
+  for (const item of candidates) { if (!budget.remaining) { partial = true; break; } deep(item); }
+  for (const item of deferred) {
+    if (docs.length >= limit) break;
+    if (!budget.remaining) { partial = true; break; }
+    deep(item);
   }
   // BM25 over weighted fields (title > tags > headings > body), AND semantics, mild recency boost.
-  const average = totalLength / Math.max(1, scanned), idf = df.map(n => Math.log(1 + (scanned - n + 0.5) / (n + 0.5)));
+  const average = totalLength / Math.max(1, deepCount), idf = df.map(n => Math.log(1 + (scanned - n + 0.5) / (n + 0.5)));
   const matches = docs.map(d => {
     const bm25 = d.tf.reduce((sum, f, i) => sum + idf[i] * f * (BM25_K1 + 1) / (f + BM25_K1 * (1 - BM25_B + BM25_B * d.length / average)), 0);
     const age = Math.max(0, now - fs.statSync(d.file).mtimeMs) / 86400000;
@@ -122,7 +140,7 @@ export function search(ctx, query, { limit = 8, source = 'memory', now = Date.no
     if (i < 0) i = lower.findIndex(l => terms.some(t => l.includes(t)));
     return { path: d.name, title: d.heading, line: Math.max(1, i + 1), match: 'text', snippet: (lines[i] || '').slice(0, 180), score };
   });
-  matches.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
+  matches.sort((a, b) => b.score - a.score || cmp(a.path, b.path));
   return bounded({ query, source, hits: matches.slice(0, limit).map(({ score, ...hit }) => hit), scanned, partial: partial || budget.partial, outputTruncated: false, guidance: matches.length ? 'Open only a matching excerpt. Start with at most two notes.' : 'No useful match in the scanned notes. Continue with current evidence; narrow scope if scan was partial.' }, 'hits');
 }
 
@@ -179,6 +197,7 @@ export function maintenance(ctx, { archiveDuplicates = false, reindex = false, p
   }
   if (promote !== undefined) {
     if (typeof promote !== 'string' || !promote.startsWith('inbox/') || !promote.endsWith('.md') || path.isAbsolute(promote) || promote.split(/[\\/]/u).some(s => !s || s.startsWith('.'))) throw new Error('Choose a visible Markdown note inside inbox/ to promote.');
+    if (promote.split('/').some(seg => SENSITIVE.test(seg) || OMIT.has(seg))) throw new Error('Not promoting: search skips this name (secret/password/credential/private-key or tooling folders). Rename the inbox note first.');
     const from = path.resolve(root, promote);
     if (!from.startsWith(path.join(root, 'inbox') + path.sep)) throw new Error('Choose a visible Markdown note inside inbox/ to promote.');
     noLink(path.join(root, 'inbox')); noLink(from);

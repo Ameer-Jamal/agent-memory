@@ -231,3 +231,26 @@ test('real stdio capture refuses alphabetic credentials and preserves changed ve
     assert.equal(JSON.parse(saved.content[0].text).status, 'saved');
   }
 });
+
+test('overlap never invites reuse when only source or status differs, but exact duplicates still reuse', t => {
+  const { ctx, root } = fixture(t), tools = createMemoryTools(ctx, { allowWrite: true });
+  const p = tools.memory_remember.run({ lesson }); const first = tools.memory_remember.run({ review_id: p.review_id, decision: 'save_new' });
+  for (const [change, flag] of [[{ source: 'A different documented source' }, 'same_source'], [{ status: 'unverified' }, 'same_status']]) {
+    const b = tools.memory_remember.run({ lesson: { ...lesson, ...change } });
+    const o = b.overlaps.find(x => x.path === first.path); assert.equal(o.overlap, 1); assert.equal(o[flag], false);
+    const saved = tools.memory_remember.run({ review_id: b.review_id, decision: 'save_new' });
+    assert.equal(saved.saved, true, flag);
+  }
+  assert.equal(noteCount(root), 3);
+  const exact = tools.memory_remember.run({ lesson });
+  const eo = exact.overlaps.find(x => x.path === first.path); assert.equal(eo.same_status && eo.same_source, true);
+  assert.equal(tools.memory_remember.run({ review_id: exact.review_id, decision: 'save_new' }).status, 'reused'); assert.equal(noteCount(root), 3);
+});
+
+test('secrets scan ignores env references, calls and plain words in lessons', t => {
+  const { ctx } = fixture(t), tools = createMemoryTools(ctx, { allowWrite: true });
+  for (const fix of ['password: process.env.PASSWORD', 'password: getPassword(),', 'secret: required', 'tokenizer: whitespace-based'])
+    assert.equal(tools.memory_remember.run({ lesson: { ...lesson, fix } }).status, 'review_required', fix);
+  for (const fix of ['password: "correcthorsebatterystaple"', "token='abcdefghijkl'"])
+    assert.throws(() => tools.memory_remember.run({ lesson: { ...lesson, fix } }), /credentials/u, fix);
+});

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { context, install, planSetup, uninstall, targets, load, read, doctor, prepareTest, checkTest, cleanTest, probe, hash } from '../src/core.mjs';
 import { ADAPTERS, AGENTS } from '../src/adapters.mjs';
 import { pointer, templates } from '../src/templates.mjs';
-import { search, show, walkMarkdown, maintenance, previewMaintenance, applyMaintenance } from '../src/notebook.mjs';
+import { search, show, walkMarkdown, findSecret, maintenance, previewMaintenance, applyMaintenance } from '../src/notebook.mjs';
 import { planProject, connectProject } from '../src/projects.mjs';
 import { invocation, finalText, verifyLive, runCommand, failureHint } from '../src/verification.mjs';
 import { serveUI } from '../src/ui.mjs';
@@ -400,4 +400,36 @@ test('promotion apply rejects edited plans and traversal even with a recomputed 
   write(planFile, JSON.stringify(original));
   applyMaintenance(ctx, preview.planId);
   assert.ok(fs.existsSync(path.join(root, 'topics', 'safe.md')));
+});
+
+test('a title match is found even when many large notes exhaust the deep-read budget', t => {
+  const { ctx, root } = fixture(t);
+  const filler = '# Filler\n' + 'lorem ipsum dolor sit amet. '.repeat(2400);
+  for (let i = 0; i < 300; i++) write(path.join(root, 'topics', `n${String(i).padStart(3, '0')}.md`), filler);
+  write(path.join(root, 'topics', 'zzz-target.md'), '# Zebra deployment checklist\nSteps.\n');
+  const r = search(ctx, 'zebra deployment');
+  assert.deepEqual(r.hits.map(h => h.path), ['topics/zzz-target.md']);
+  assert.ok(r.scanned >= 301); assert.ok(JSON.stringify(r).length <= 4000);
+});
+
+test('secret scan is linear on pathological input and ignores non-literal values', () => {
+  for (const text of ['a.'.repeat(120000), 'password'.repeat(40000), 'token: '.repeat(30000), 'x'.repeat(300000)]) {
+    const start = Date.now(); findSecret(text); assert.ok(Date.now() - start < 1500, `slow on ${text.slice(0, 12)}`);
+  }
+  for (const ok of ['password: process.env.PASSWORD', 'password: getPassword(),', 'secret: required', 'tokenizer: whitespace-based', 'password = os.environ["PASSWORD1"]', 'token:\nabcd1234efgh5678', 'password=$DB_PASSWORD1', 'max_tokens: 1000000']) assert.equal(findSecret(ok), null, ok);
+  for (const bad of ['password: "correcthorsebatterystaple"', "token='abcdefghijkl'", 'DB_PASSWORD=hunter2hunter2', '"api_key": "abcd1234efgh5678"']) assert.equal(findSecret(bad), 'password or key assignment', bad);
+});
+
+test('promote refuses names that search skips so notes cannot vanish', t => {
+  const { ctx, root } = fixture(t);
+  for (const name of ['secrets.md', 'my-passwords.md', 'private-key.md', 'node_modules/x.md', 'credentials/a.md']) {
+    write(path.join(root, 'inbox', name), '# Note');
+    assert.throws(() => maintenance(ctx, { promote: `inbox/${name}` }), /search skips/u, name);
+  }
+});
+
+test('promote preview of a 240 KB note is fast', t => {
+  const { ctx, root } = fixture(t);
+  write(path.join(root, 'inbox', 'big.md'), '# Big\n' + 'a.'.repeat(120000));
+  const start = Date.now(); maintenance(ctx, { promote: 'inbox/big.md' }); assert.ok(Date.now() - start < 3000);
 });
