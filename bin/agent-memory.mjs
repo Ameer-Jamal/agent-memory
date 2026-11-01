@@ -46,6 +46,7 @@ const HELP = `
     --limit N           Search hits, 1–8 (default 8)
     --start N --lines N Excerpt range (default 1 / 40)
     --archive-duplicates --reindex   Maintenance actions to preview
+    --promote inbox/X.md  Maintenance: preview moving a vetted inbox note to topics/
     --apply --plan ID   Apply a previously reviewed maintenance plan
     --path DIRECTORY   Project to connect or disconnect
     --live             Opt in to agent calls; may use provider credits
@@ -67,7 +68,7 @@ const HELP = `
 
 function parse(argv) {
   const flags = {}, positional = [];
-  const values = new Set(['memory-dir', 'notes-dir', 'agents', 'answer', 'agent', 'source', 'limit', 'start', 'lines', 'plan', 'path', 'port']);
+  const values = new Set(['memory-dir', 'notes-dir', 'agents', 'answer', 'agent', 'source', 'limit', 'start', 'lines', 'plan', 'path', 'port', 'promote']);
   const booleans = new Set(['allow-capture', 'upgrade-policy', 'dry-run', 'yes', 'json', 'help', 'version', 'archive-duplicates', 'reindex', 'apply', 'live', 'no-open', 'allow-write']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -190,10 +191,10 @@ async function main() {
       if (flags.apply) {
         if (flags['dry-run']) throw new Error('Choose preview or apply, not both.');
         if (!flags.plan) throw new Error('Preview first, then supply its --plan ID.');
-        if (!await confirm('Apply only the reviewed archive/index actions?')) { console.log('Cancelled.'); return; }
+        if (!await confirm('Apply only the reviewed archive/promote/index actions?')) { console.log('Cancelled.'); return; }
         output(applyMaintenance(ctx, flags.plan));
       } else {
-        const opts = { archiveDuplicates: Boolean(flags['archive-duplicates']), reindex: Boolean(flags.reindex) };
+        const opts = { archiveDuplicates: Boolean(flags['archive-duplicates']), reindex: Boolean(flags.reindex), promote: flags.promote };
         const result = flags['dry-run'] ? maintenance(ctx, opts).summary : previewMaintenance(ctx, opts);
         output(result);
         if (!flags.json) console.log(`\nNothing changed in your notes. To apply reviewed actions: agent-memory maintain --apply --plan ${result.planId}`);

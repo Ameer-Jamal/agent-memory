@@ -6,6 +6,18 @@ const OMIT = new Set(['.git', '.obsidian', '.archive', 'node_modules', '.config'
 const SENSITIVE = /(?:^|[-_ .])(?:secrets?|passwords?|credentials?|private[-_ ]?keys?)(?:[-_ .]|$)/iu;
 export const SEARCH_CAP = 4000;
 
+const SECRET_PATTERNS = [
+  ['private key', /-----BEGIN [A-Z ]*PRIVATE KEY-----/u],
+  ['AWS access key', /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/u],
+  ['API token', /\b(?:ghp_|gho_|ghs_|github_pat_|sk-proj-|sk-ant-|xox[abprs]-)[A-Za-z0-9_-]{10,}|\bsk-[A-Za-z0-9]{32,}|\bAIza[0-9A-Za-z_-]{35}\b|\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/u],
+  ['bearer token', /\bBearer\s+[A-Za-z0-9._~+/-]{20,}=*/u],
+  ['URL with embedded password', /https?:\/\/[^\s/:@]+:[^\s/@]+@/u],
+  // A secret-like name assigned a 8+ character literal that has a digit or symbol; env references and placeholders are ignored.
+  ['password or key assignment', /\b[\w.-]*(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key|token)[\w.-]*["']?\s*[:=]\s*["']?(?![$<{%(])(?=[^\s"']*[\d!@#$%^&*+/=])[^\s"']{8,}/iu],
+];
+/** Returns the kind of credential the text appears to contain, or null. Not a complete secret scanner. */
+export function findSecret(text) { return SECRET_PATTERNS.find(([, re]) => re.test(text))?.[0] ?? null; }
+
 export function notebook(ctx) {
   const state = load(ctx);
   if (!state) throw new Error('Run setup first.');
@@ -48,12 +60,21 @@ function head(file, budget, maximum = 65536) {
 }
 
 function title(text, file) { return (text.match(/^#\s+(.+)$/mu)?.[1] || path.basename(file, '.md')).slice(0, 160); }
+const BM25_K1 = 1.2, BM25_B = 0.75, RECENCY = 0.1;
+const FIELD_WEIGHT = { title: 3, tags: 2, headings: 1.5, body: 1 };
+const count = (text, term) => text.split(term).length - 1;
+function fieldsOf(shelf, text) {
+  const front = text.match(/^---\r?\n([\s\S]*?)\r?\n---/u)?.[1] || '';
+  const tags = front.match(/^tags:\s*(.*)$/mu)?.[1] || '';
+  const headings = (text.match(/^#{1,6}\s+.+$/gmu) || []).join('\n');
+  return { title: shelf.toLowerCase(), tags: tags.toLowerCase(), headings: headings.toLowerCase(), body: text.toLowerCase() };
+}
 function bounded(value, key, cap = SEARCH_CAP) {
   while (JSON.stringify(value).length > cap && value[key]?.length) { value[key].pop(); value.outputTruncated = true; }
   return value;
 }
 
-export function search(ctx, query, { limit = 8, source = 'memory' } = {}) {
+export function search(ctx, query, { limit = 8, source = 'memory', now = Date.now() } = {}) {
   const state = notebook(ctx);
   if (typeof query !== 'string' || !query.trim() || query.length > 200) throw new Error('Use a short query of up to 200 characters.');
   if (!Number.isInteger(limit) || limit < 1 || limit > 8) throw new Error('Search returns 1–8 hits. Narrow the query instead of increasing the cap.');
@@ -69,27 +90,29 @@ export function search(ctx, query, { limit = 8, source = 'memory' } = {}) {
     files.push(...result.files); partial ||= result.partial;
   }
   const budget = { remaining: 8 * 1024 * 1024, partial: false };
-  const matches = [], deferred = []; let scanned = 0;
-  // Prefer file names and headings before searching bodies. All I/O stays local.
+  const docs = [], df = terms.map(() => 0); let scanned = 0, totalLength = 0;
   for (const file of files) {
     if (!budget.remaining) { partial = true; break; }
-    const text = head(file, budget, 2048), name = path.relative(root, file).replaceAll('\\', '/'), heading = title(text, file);
-    const shelf = `${name} ${heading}`.toLowerCase(); scanned++;
-    if (terms.every(t => shelf.includes(t))) matches.push({ path: name, title: heading, line: 1, match: 'title', score: 100 });
-    else deferred.push({ file, name, heading });
+    const text = head(file, budget), name = path.relative(root, file).replaceAll('\\', '/'), heading = title(text, file);
+    scanned++;
+    const fields = fieldsOf(`${name} ${heading}`, text), length = Math.max(1, text.split(/\s+/u).length);
+    totalLength += length;
+    const tf = terms.map(t => Object.entries(FIELD_WEIGHT).reduce((sum, [f, w]) => sum + w * count(fields[f], t), 0));
+    tf.forEach((n, i) => { if (n > 0) df[i]++; });
+    if (tf.every(n => n > 0)) docs.push({ file, name, heading, text, tf, length, titleHit: terms.every(t => fields.title.includes(t)) });
   }
-  if (matches.length < limit) {
-    for (const item of deferred) {
-      if (!budget.remaining) { partial = true; break; }
-      const text = head(item.file, budget), lower = `${item.name} ${item.heading}\n${text}`.toLowerCase();
-      if (!terms.every(t => lower.includes(t))) continue;
-      const lines = text.split('\n');
-      let i = lines.findIndex(line => terms.every(t => line.toLowerCase().includes(t)));
-      if (i < 0) i = lines.findIndex(line => terms.some(t => line.toLowerCase().includes(t)));
-      matches.push({ path: item.name, title: item.heading, line: Math.max(1, i + 1), match: 'text', snippet: (lines[i] || '').slice(0, 180), score: 10 });
-      if (matches.length >= limit * 2) break;
-    }
-  }
+  // BM25 over weighted fields (title > tags > headings > body), AND semantics, mild recency boost.
+  const average = totalLength / Math.max(1, scanned), idf = df.map(n => Math.log(1 + (scanned - n + 0.5) / (n + 0.5)));
+  const matches = docs.map(d => {
+    const bm25 = d.tf.reduce((sum, f, i) => sum + idf[i] * f * (BM25_K1 + 1) / (f + BM25_K1 * (1 - BM25_B + BM25_B * d.length / average)), 0);
+    const age = Math.max(0, now - fs.statSync(d.file).mtimeMs) / 86400000;
+    const score = bm25 * (1 + RECENCY * Math.max(0, 1 - age / 365));
+    if (d.titleHit) return { path: d.name, title: d.heading, line: 1, match: 'title', score };
+    const lines = d.text.split('\n'), lower = lines.map(l => l.toLowerCase());
+    let i = lower.findIndex(l => terms.every(t => l.includes(t)));
+    if (i < 0) i = lower.findIndex(l => terms.some(t => l.includes(t)));
+    return { path: d.name, title: d.heading, line: Math.max(1, i + 1), match: 'text', snippet: (lines[i] || '').slice(0, 180), score };
+  });
   matches.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
   return bounded({ query, source, hits: matches.slice(0, limit).map(({ score, ...hit }) => hit), scanned, partial: partial || budget.partial, outputTruncated: false, guidance: matches.length ? 'Open only a matching excerpt. Start with at most two notes.' : 'No useful match in the scanned notes. Continue with current evidence; narrow scope if scan was partial.' }, 'hits');
 }
@@ -111,7 +134,7 @@ export function show(ctx, relative, { start = 1, lines = 40, source = 'memory' }
   return result;
 }
 
-export function maintenance(ctx, { archiveDuplicates = false, reindex = false, now = new Date() } = {}) {
+export function maintenance(ctx, { archiveDuplicates = false, reindex = false, promote, now = new Date() } = {}) {
   const state = notebook(ctx), root = state.memoryDir;
   let scanPartial = false;
   const files = ['topics', 'inbox'].flatMap(d => {
@@ -145,6 +168,20 @@ export function maintenance(ctx, { archiveDuplicates = false, reindex = false, n
     if (actions.length >= 50) break;
     actions.push({ type: 'archive', from: note.file, to: path.join(root, '.archive', `${path.basename(note.file, '.md')}-${hash(path.relative(root, note.file)).slice(0, 8)}-${note.digest.slice(0, 8)}.md`), digest: note.digest });
   }
+  if (promote !== undefined) {
+    if (typeof promote !== 'string' || !promote.startsWith('inbox/') || !promote.endsWith('.md') || path.isAbsolute(promote) || promote.split(/[\\/]/u).some(s => !s || s.startsWith('.'))) throw new Error('Choose a visible Markdown note inside inbox/ to promote.');
+    const from = path.resolve(root, promote);
+    if (!from.startsWith(path.join(root, 'inbox') + path.sep)) throw new Error('Choose a visible Markdown note inside inbox/ to promote.');
+    noLink(path.join(root, 'inbox')); noLink(from);
+    if (!fs.statSync(from, { throwIfNoEntry: false })?.isFile()) throw new Error('That inbox note does not exist.');
+    if (fs.statSync(from).size > 256 * 1024) throw new Error('That note is too large to promote; shorten it first.');
+    if (actions.some(a => a.from === from)) throw new Error('That note is already planned for archiving.');
+    const text = read(from), kind = findSecret(text);
+    if (kind) throw new Error(`Not promoting: the note appears to contain a credential (${kind}). Remove it first.`);
+    const to = path.join(root, 'topics', path.basename(from));
+    if (fs.existsSync(to)) throw new Error('A topic with that file name already exists; rename the inbox note first.');
+    actions.push({ type: 'promote', from, to, digest: hash(text) });
+  }
   if (reindex) {
     const file = path.join(root, 'INDEX.md'), before = read(file) || '';
     const startMarker = '<!-- agent-memory:shelf:start -->', endMarker = '<!-- agent-memory:shelf:end -->';
@@ -177,15 +214,16 @@ export function applyMaintenance(ctx, id) {
     if (!id || plan.id !== id || plan.root !== state.memoryDir || !Array.isArray(plan.actions)) throw new Error('Preview maintenance first and use its exact plan ID.');
     const inside = p => typeof p === 'string' && p.startsWith(state.memoryDir + path.sep);
     for (const a of plan.actions) {
-      if (!['archive', 'index'].includes(a.type) || !inside(a.from || a.file) || (a.type === 'archive' && (!inside(a.to) || !a.to.startsWith(path.join(state.memoryDir, '.archive') + path.sep)))) throw new Error('Unexpected maintenance path.');
+      const target = { archive: '.archive', promote: 'topics' }[a.type];
+      if (!['archive', 'index', 'promote'].includes(a.type) || !inside(a.from || a.file) || (target && (!inside(a.to) || !a.to.startsWith(path.join(state.memoryDir, target) + path.sep))) || (a.type === 'promote' && !a.from.startsWith(path.join(state.memoryDir, 'inbox') + path.sep))) throw new Error('Unexpected maintenance path.');
       noLink(a.from || a.file); if (a.to) noLink(a.to);
       if (hash(read(a.from || a.file) || '') !== a.digest) throw new Error('A note changed since the preview. Preview again before applying.');
-      if (a.to && fs.existsSync(a.to)) throw new Error('An archive target already exists; no files were changed.');
+      if (a.to && fs.existsSync(a.to)) throw new Error('A destination file already exists; no files were changed.');
     }
     const done = [];
     try {
       for (const a of plan.actions) {
-        if (a.type === 'archive') { fs.mkdirSync(path.dirname(a.to), { recursive: true, mode: 0o700 }); fs.renameSync(a.from, a.to); }
+        if (a.type !== 'index') { fs.mkdirSync(path.dirname(a.to), { recursive: true, mode: 0o700 }); fs.renameSync(a.from, a.to); }
         else {
           atomicWrite(path.join(ctx.configDir, 'backups', `index-${Date.now()}.md`), a.before);
           atomicWrite(a.file, a.after);
@@ -194,7 +232,7 @@ export function applyMaintenance(ctx, id) {
       }
     } catch (e) {
       for (const a of done.reverse()) {
-        if (a.type === 'archive') { if (!fs.existsSync(a.from) && hash(read(a.to) || '') === a.digest) fs.renameSync(a.to, a.from); }
+        if (a.type !== 'index') { if (!fs.existsSync(a.from) && hash(read(a.to) || '') === a.digest) fs.renameSync(a.to, a.from); }
         else if (read(a.file) === a.after) atomicWrite(a.file, a.before);
       }
       throw e;

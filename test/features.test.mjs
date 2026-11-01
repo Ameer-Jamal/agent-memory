@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { context, install, planSetup, uninstall, targets, load, read, doctor, prepareTest, checkTest, cleanTest, probe } from '../src/core.mjs';
 import { ADAPTERS, AGENTS } from '../src/adapters.mjs';
 import { pointer, templates } from '../src/templates.mjs';
-import { search, show, walkMarkdown, previewMaintenance, applyMaintenance } from '../src/notebook.mjs';
+import { search, show, walkMarkdown, maintenance, previewMaintenance, applyMaintenance } from '../src/notebook.mjs';
 import { planProject, connectProject } from '../src/projects.mjs';
 import { invocation, finalText, verifyLive, runCommand, failureHint } from '../src/verification.mjs';
 import { serveUI } from '../src/ui.mjs';
@@ -276,4 +276,91 @@ test('CLI bounded lookup and policy upgrade options work in an isolated home', t
   assert.equal(run(['setup', '--agents', 'opencode', '--memory-dir', opts.memoryDir, '--upgrade-policy', '--yes']).applied, true);
   const result = run(['maintain', '--reindex']); assert.ok(result.planId);
   assert.equal(run(['maintain', '--apply', '--plan', result.planId, '--yes']).notesDeleted, 0);
+});
+
+const mtime = (file, days) => { const d = new Date(Date.now() - days * 86400000); fs.utimesSync(file, d, d); };
+
+test('search ranks by term weight: title and heading beat body, rare terms beat common ones, and ties are stable', t => {
+  const { ctx, root } = fixture(t);
+  write(path.join(root, 'topics', 'a-body.md'), '# Misc\n' + 'deploy pipeline notes. '.repeat(3) + '\nmention of flaky once.\n');
+  write(path.join(root, 'topics', 'b-title.md'), '# Flaky deploy\nSome text.\n');
+  write(path.join(root, 'topics', 'c-tags.md'), '---\ntags: [flaky, deploy]\n---\n# Other\nText.\n');
+  write(path.join(root, 'topics', 'd-heading.md'), '# Notes\n## Flaky deploy fix\nText.\n');
+  for (const f of ['a-body', 'b-title', 'c-tags', 'd-heading']) mtime(path.join(root, 'topics', `${f}.md`), 400);
+  const order = search(ctx, 'flaky deploy').hits.map(h => h.path);
+  assert.equal(order[0], 'topics/b-title.md'); assert.equal(order.at(-1), 'topics/a-body.md');
+  assert.deepEqual(search(ctx, 'flaky deploy').hits.map(h => h.path), order);
+  assert.ok(order.indexOf('topics/c-tags.md') < order.indexOf('topics/a-body.md'));
+  // A rare term outweighs a term present in every note.
+  write(path.join(root, 'topics', 'e-rare.md'), '# Notes\nflaky zebra42 detail');
+  mtime(path.join(root, 'topics', 'e-rare.md'), 400);
+  assert.equal(search(ctx, 'deploy zebra42').hits.length, 0, 'AND semantics are preserved');
+  assert.equal(search(ctx, 'flaky zebra42').hits[0].path, 'topics/e-rare.md');
+});
+
+test('search gives only a mild recency boost, never overriding a clearly better match', t => {
+  const { ctx, root } = fixture(t);
+  write(path.join(root, 'topics', 'old.md'), '# Cache reset\nbody'); write(path.join(root, 'topics', 'new.md'), '# Cache reset\nbody');
+  mtime(path.join(root, 'topics', 'old.md'), 900); mtime(path.join(root, 'topics', 'new.md'), 1);
+  assert.deepEqual(search(ctx, 'cache reset').hits.map(h => h.path), ['topics/new.md', 'topics/old.md']);
+  write(path.join(root, 'topics', 'fresh-body.md'), '# Unrelated\ncache reset'); mtime(path.join(root, 'topics', 'fresh-body.md'), 0);
+  assert.equal(search(ctx, 'cache reset').hits.at(-1).path, 'topics/fresh-body.md');
+  assert.equal(search(ctx, 'cache reset', { now: Date.now() + 5 * 365 * 86400000 }).hits[0].path, 'topics/new.md');
+});
+
+test('promote moves a vetted inbox note to topics only after a reviewed plan', t => {
+  const { ctx, root } = fixture(t);
+  const text = '---\nstatus: verified\nscope: project-a\n---\n# Runner fix\nUse Java 21.\n';
+  write(path.join(root, 'inbox', 'runner.md'), text);
+  const dry = maintenance(ctx, { promote: 'inbox/runner.md' }).summary;
+  assert.deepEqual(dry.actions, [{ type: 'promote', path: 'inbox/runner.md' }]); assert.ok(fs.existsSync(path.join(root, 'inbox', 'runner.md')));
+  const preview = previewMaintenance(ctx, { promote: 'inbox/runner.md' });
+  assert.equal(read(path.join(root, 'inbox', 'runner.md')), text); assert.equal(fs.existsSync(path.join(root, 'topics', 'runner.md')), false);
+  assert.throws(() => applyMaintenance(ctx, 'wrong-id'), /exact plan ID/u);
+  applyMaintenance(ctx, preview.planId);
+  assert.equal(read(path.join(root, 'topics', 'runner.md')), text); assert.equal(fs.existsSync(path.join(root, 'inbox', 'runner.md')), false);
+  assert.equal(search(ctx, 'runner fix').hits[0].path, 'topics/runner.md');
+});
+
+test('promote refuses traversal, non-inbox paths, linked paths, secrets, collisions and changed notes', t => {
+  const { ctx, root, base } = fixture(t);
+  write(path.join(base, 'outside.md'), '# Outside'); write(path.join(root, 'topics', 'existing.md'), '# Existing');
+  for (const bad of ['../outside.md', 'inbox/../../outside.md', 'inbox/../topics/existing.md', '/etc/passwd', 'topics/existing.md', 'inbox/.hidden.md', 'inbox/note.txt', 'inbox/missing.md', '', 7]) {
+    assert.throws(() => maintenance(ctx, { promote: bad }), /inbox|does not exist/u, String(bad));
+  }
+  write(path.join(root, 'inbox', 'leak.md'), '# Leak\napi_key = abcd1234efgh5678\n');
+  assert.throws(() => maintenance(ctx, { promote: 'inbox/leak.md' }), /credential/u);
+  write(path.join(root, 'inbox', 'existing.md'), '# Another'); 
+  assert.throws(() => maintenance(ctx, { promote: 'inbox/existing.md' }), /already exists/u);
+  if (process.platform !== 'win32') {
+    fs.symlinkSync(path.join(base, 'outside.md'), path.join(root, 'inbox', 'linked.md'));
+    assert.throws(() => maintenance(ctx, { promote: 'inbox/linked.md' }), /symbolic-link/u);
+  }
+  write(path.join(root, 'inbox', 'fine.md'), '# Fine'); const plan = previewMaintenance(ctx, { promote: 'inbox/fine.md' });
+  fs.appendFileSync(path.join(root, 'inbox', 'fine.md'), '\nedited');
+  assert.throws(() => applyMaintenance(ctx, plan.planId), /changed since/u);
+  assert.ok(fs.existsSync(path.join(root, 'inbox', 'fine.md'))); assert.equal(fs.existsSync(path.join(root, 'topics', 'fine.md')), false);
+  assert.ok(fs.existsSync(path.join(base, 'outside.md')));
+});
+
+test('a tampered promote plan cannot move notes outside inbox or into other folders', t => {
+  const { ctx, root, base } = fixture(t);
+  write(path.join(root, 'inbox', 'a.md'), '# A'); write(path.join(root, 'topics', 't.md'), '# T');
+  const plan = previewMaintenance(ctx, { promote: 'inbox/a.md' }), file = path.join(ctx.configDir, 'maintenance-plan.json'), data = JSON.parse(read(file));
+  data.actions[0].to = path.join(base, 'elsewhere.md'); fs.writeFileSync(file, JSON.stringify(data));
+  assert.throws(() => applyMaintenance(ctx, plan.planId), /Unexpected maintenance path|exact plan ID/u);
+  data.actions[0].to = path.join(root, 'topics', 'a.md'); data.actions[0].from = path.join(root, 'topics', 't.md'); fs.writeFileSync(file, JSON.stringify(data));
+  assert.throws(() => applyMaintenance(ctx, plan.planId), /Unexpected maintenance path|exact plan ID/u);
+  assert.ok(fs.existsSync(path.join(root, 'topics', 't.md')));
+});
+
+test('CLI promote previews without changing notes and the MCP server exposes no promote tool', t => {
+  const { home, ctx, root } = fixture(t, ['codex']);
+  write(path.join(root, 'inbox', 'x.md'), '# X lesson\nBody.');
+  const env = { ...process.env, HOME: home, USERPROFILE: home, AGENT_MEMORY_CONFIG_DIR: ctx.configDir };
+  const r = spawnSync(process.execPath, [cli, 'maintain', '--promote', 'inbox/x.md', '--json'], { env, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr); assert.equal(JSON.parse(r.stdout).actions[0].type, 'promote');
+  assert.ok(fs.existsSync(path.join(root, 'inbox', 'x.md'))); assert.equal(fs.existsSync(path.join(root, 'topics', 'x.md')), false);
+  const bad = spawnSync(process.execPath, [cli, 'maintain', '--promote', '../x.md', '--dry-run'], { env, encoding: 'utf8' });
+  assert.notEqual(bad.status, 0); assert.ok(fs.existsSync(path.join(root, 'inbox', 'x.md')));
 });

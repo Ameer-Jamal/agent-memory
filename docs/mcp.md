@@ -50,9 +50,13 @@ A lesson includes title, scope, status (`verified`, `user-stated`, or `unverifie
    - `save_difference` + `existing_path`: the same scope gains useful evidence or a changed fact. A new short note links to the original; the original stays intact.
    - `save_new`: a useful new scoped lesson.
 
+Before saving, the preview scans up to the 300 most recently modified notes (16 KB each) with the same `scope` and lists up to three `overlaps` of at least 50% word overlap (Jaccard over words, headings and metadata ignored). `same_numbers: false` means the numbers or versions differ, so it is not a duplicate. Finalizing `save_new` against an overlap of 90% or more with identical numbers returns `reused` rather than writing a copy; choose `save_difference` to keep a deliberate addition. This is lexical, deterministic, and bounded; paraphrases can slip through, and the agent's judgment still applies.
+
+Lessons are refused if they look like credentials: private keys, AWS access keys, GitHub/OpenAI/Anthropic/Slack/Google/JWT-style tokens, bearer tokens, URLs with embedded passwords, and `password`/`secret`/`token`/`api_key`-style assignments with a literal value of 8+ characters. Placeholders like `$VAR` or `<value>`, short values and ordinary prose pass. The error names the kind, never the value. This is a pattern check, not a complete secret scanner.
+
 An exact generated duplicate among the bounded preview candidates is reused even if the caller requests a new save. This is not a full-catalog guarantee. The percentage is **agent judgment**, not a computed meaning score or an enforced semantic classifier. A distinct environment/version or conflicting evidence must not be discarded just because wording matches. Reuse/difference requires a matching scope field; a different scope uses `save_new`.
 
-Reviews are private in-process state, limited to 20 pending previews, and expire after 15 minutes. They do not survive restarting the MCP process. Changed notebook metadata, policy, or configured root requires a fresh preview so another agent's intervening capture is considered. The MCP process writes only new unique inbox files; it provides no archive/delete/merge tool.
+Reviews are private in-process state, limited to 20 pending previews, and expire after 15 minutes. They do not survive restarting the MCP process. Changed notebook metadata, policy, or configured root requires a fresh preview so another agent's intervening capture is considered. The MCP process writes only new unique inbox files; it provides no archive/delete/merge/promote tool. Moving a reviewed note from inbox to topics is a CLI step with an explicit plan: `agent-memory maintain --promote inbox/NOTE.md`, then `agent-memory maintain --apply --plan ID`.
 
 ## Verify the full loop
 

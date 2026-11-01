@@ -9,7 +9,7 @@ The small global pointer contains the retrieval policy itself:
 - Skip memory for routine work.
 - Search on unfamiliar tasks, repeated failures, or an explicit memory question.
 - Start with at most **two focused queries** and **two relevant excerpts**.
-- Search filenames and headings first, then body text as needed.
+- Search ranks titles, tags and headings above body text.
 - If nothing helps, stop looking and work from current evidence.
 - Expand the search only for a concrete useful lead.
 
@@ -22,7 +22,7 @@ agent-memory search "java local runner" --json
 agent-memory show "topics/local-runner.md" --start 15 --lines 40
 ```
 
-Search uses literal case-insensitive keywords, not a vector database or a model. All query terms must appear in the title/path or bounded note content. It returns at most eight results and 4,000 serialized characters, including the brief guidance. Results identify a note and line, with a short matching line when needed. Title matches do not include a body dump.
+Search uses literal case-insensitive keywords, not a vector database or a model. All query terms must appear in the path, title, tags, headings or bounded note content. Matches are ranked with a deterministic BM25-style score: rarer terms count more, long notes are normalized, and a term in the path/title counts 3x, in `tags:` front matter 2x, and in a heading 1.5x. A mild recency boost (at most 10%, fading over a year, from file modification time) breaks near-ties toward fresher notes; ties sort by path. It returns at most eight results and 4,000 serialized characters, including the brief guidance. Results identify a note and line, with a short matching line when needed. Title matches do not include a body dump.
 
 `show` returns line-numbered excerpts: 40 lines by default, a maximum of 60, and a 4,000-character output cap. It refuses traversal and symbolic-link paths. To follow a lead in a configured existing-notes folder, use `--source notes` on search/show.
 
@@ -45,7 +45,7 @@ Other platforms can use their file-search tools with the same limits. Never use 
 
 ## Local I/O bounds
 
-The built-in search scans at most 10,000 Markdown files across topics/inbox, has an 8 MiB read budget, and reads bounded prefixes of individual files. It skips linked paths, hidden/editor metadata, archive directories, and obviously sensitive filenames. A result explicitly marks a partial scan; no match is not proof that the entire notebook lacks the fact.
+The built-in search scans at most 10,000 Markdown files across topics/inbox, has an 8 MiB read budget, and reads bounded prefixes of individual files. Each note's first 64 KiB is read for ranking, so a partial scan is reported sooner in very large notebooks. It skips linked paths, hidden/editor metadata, archive directories, and obviously sensitive filenames. A result explicitly marks a partial scan; no match is not proof that the entire notebook lacks the fact.
 
 This keeps requests bounded; it does not promise indexed search over millions of books. For a very large collection, narrow the notes source and use a targeted local grep to follow a specific lead. There is no persistent content index or embeddings service in this release.
 
@@ -53,7 +53,7 @@ This keeps requests bounded; it does not promise indexed search over millions of
 
 A new lesson should usually be under 200 words. Include the symptom, scope, fix or correction, and evidence. Save a link/source instead of copying an entire article, transcript, or log. Use one file per discovery and search for duplicates first. The rule is a policy for agents, not a hard filesystem quota.
 
-Before saving, compare likely existing lessons by meaning. When overlap is over 90%, scope is the same, and no useful information is added, reuse the existing note instead of creating another. Rewording is not a new lesson. Preserve important differences in environment, versions, fixes, or evidence as a concise addition linked to the prior note. The percentage is an agent judgment, not a computed similarity metric or an automatic filesystem gate. Exact-duplicate maintenance remains a separate operation.
+Before saving, compare likely existing lessons by meaning. When overlap is over 90%, scope is the same, and no useful information is added, reuse the existing note instead of creating another. Rewording is not a new lesson. Preserve important differences in environment, versions, fixes, or evidence as a concise addition linked to the prior note. The percentage is an agent judgment; the MCP preview additionally reports a computed lexical word-overlap figure for same-scope notes as a hint, and `save_new` reuses a same-scope note at 90% or more overlap with identical numbers/versions (see [MCP](mcp.md)). Lexical overlap is not meaning. Exact-duplicate maintenance remains a separate operation. `agent-memory maintain` also lists exact duplicates, stale verified notes and same-title conflicts without changing anything. To graduate a reviewed inbox lesson, preview `agent-memory maintain --promote inbox/NOTE.md`, then apply the plan ID with `--apply --plan`.
 
 ## Existing installations
 

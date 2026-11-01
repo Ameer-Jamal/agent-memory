@@ -5,7 +5,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
 import { context, VERSION, doctor, hash, load, lock, noLink } from './core.mjs';
-import { search, show, walkMarkdown } from './notebook.mjs';
+import { search, show, walkMarkdown, findSecret } from './notebook.mjs';
 
 const text = (max = 600) => z.string().trim().min(1).max(max);
 const lessonSchema = z.object({
@@ -55,7 +55,26 @@ function renderLesson(lesson, date, related) {
 function validateLesson(lesson) {
   if (Object.values(lesson).join(' ').split(/\s+/u).length > 180) throw new Error('Keep the lesson under 180 input words (room for headings within the 200-word note).');
   const body = Object.values(lesson).join('\n');
-  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:ghp_|github_pat_|sk-proj-)[A-Za-z0-9_\-]{12,}|https?:\/\/[^\s/]+:[^\s/]+@/u.test(body)) throw new Error('Remove apparent credentials before saving. This check is not a complete secret scanner.');
+  const kind = findSecret(body);
+  if (kind) throw new Error(`Remove apparent credentials (${kind}) before saving. This check is not a complete secret scanner.`);
+}
+const words = text => new Set(text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
+const unscoped = text => text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/u, '').replace(/^Related lesson:.*$/gmu, '');
+const scopeOf = text => { const raw = text.match(/^scope:\s*(.+)$/mu)?.[1]?.trim(); try { return raw?.startsWith('"') ? JSON.parse(raw) : raw; } catch { return raw; } };
+// Deterministic lexical overlap (Jaccard over words) with same-scope notes. Differing numbers/versions are never treated as duplicates.
+function overlaps(c, lesson, content) {
+  const mine = words(unscoped(content)), numbers = set => [...set].filter(w => /\d/u.test(w)).sort().join(' ');
+  const recent = c.entries.filter(([, size]) => size <= 16000).sort((a, b) => b[2] - a[2] || a[0].localeCompare(b[0])).slice(0, 300);
+  const found = [];
+  for (const [name] of recent) {
+    const file = path.join(c.state.memoryDir, name); noLink(file);
+    const text = fs.readFileSync(file, 'utf8');
+    if (scopeOf(text)?.toLowerCase() !== lesson.scope.toLowerCase()) continue;
+    const theirs = words(unscoped(text)), shared = [...mine].filter(w => theirs.has(w)).length;
+    const overlap = Math.round(shared / (mine.size + theirs.size - shared) * 100) / 100;
+    if (overlap >= 0.5) found.push({ path: name, overlap, same_numbers: numbers(mine) === numbers(theirs) });
+  }
+  return found.sort((a, b) => b.overlap - a.overlap || a.path.localeCompare(b.path)).slice(0, 3);
 }
 function relatedNote(ctx, relative, expectedScope) {
   const c = catalog(ctx);
@@ -108,8 +127,9 @@ export function createMemoryTools(ctx, { allowWrite = false, now = Date.now } = 
           const review_id = crypto.randomBytes(16).toString('hex');
           for (const [key, value] of reviews) if (now() - value.created > 15 * 60000) reviews.delete(key);
           if (reviews.size >= 20) throw new Error('Too many pending lessons; finish a preview or restart this server.');
-          reviews.set(review_id, { lesson: args.lesson, candidates: found.hits.map(hit => hit.path), revision: c.revision, created: now() });
-          const preview = { status: 'review_required', review_id, candidates: found.hits, partial: c.partial || found.partial, guidance: 'Inspect likely matches with memory_read; refine search if needed. Over 90% meaning overlap, same scope, and no useful new information: reuse_existing with existing_path. Otherwise save_new, or save_difference with a related note. Preview is valid for 15 minutes and unchanged memory only.' };
+          const similar = overlaps(c, args.lesson, renderLesson(args.lesson, '', ''));
+          reviews.set(review_id, { lesson: args.lesson, candidates: [...new Set([...found.hits.map(hit => hit.path), ...similar.map(o => o.path)])], similar, revision: c.revision, created: now() });
+          const preview = { status: 'review_required', review_id, candidates: found.hits, ...(similar.length && { overlaps: similar }), partial: c.partial || found.partial, guidance: 'Inspect likely matches with memory_read; refine search if needed. Over 90% meaning overlap, same scope, and no useful new information: reuse_existing with existing_path. Otherwise save_new, or save_difference with a related note. Preview is valid for 15 minutes and unchanged memory only.' };
           while (JSON.stringify(preview).length > 4000 && preview.candidates.length) { preview.candidates.pop(); preview.outputTruncated = true; }
           return preview;
         }
@@ -130,6 +150,11 @@ export function createMemoryTools(ctx, { allowWrite = false, now = Date.now } = 
           const file = path.join(c.state.memoryDir, 'inbox', name); noLink(file);
           const content = renderLesson(review.lesson, date.slice(0, 10), related);
           if (content.split(/\s+/u).length > 200) throw new Error('Generated lesson exceeds 200 words; shorten the preview input.');
+          const near = review.similar.find(o => o.overlap >= 0.9 && o.same_numbers);
+          if (args.decision === 'save_new' && near) {
+            reviews.delete(args.review_id);
+            return { status: 'reused', path: near.path, saved: false, reason: `Same-scope note with ${Math.round(near.overlap * 100)}% word overlap and identical numbers/versions already exists. Use save_difference to keep a deliberate addition.` };
+          }
           // Deterministic duplicate guard among bounded preview candidates; no semantic score is invented.
           const withoutDate = s => s.replace(/^last_verified:.*$/mu, 'last_verified:');
           for (const candidate of review.candidates) {

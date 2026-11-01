@@ -133,3 +133,59 @@ test('an identical generated lesson among candidates is reused even if the calle
   const b = tools.memory_remember.run({ lesson }); const second = tools.memory_remember.run({ review_id: b.review_id, decision: 'save_new' });
   assert.equal(second.status, 'reused'); assert.equal(second.path, first.path); assert.equal(noteCount(root), 1);
 });
+
+test('secrets scan refuses common credential shapes without echoing them', t => {
+  const { ctx, root } = fixture(t), tools = createMemoryTools(ctx, { allowWrite: true });
+  const samples = {
+    'private key': '-----BEGIN RSA PRIVATE KEY-----',
+    'AWS access key': 'Use AKIAABCDEFGHIJKLMNOP for the bucket.',
+    'API token': 'Set ghp_abcdefghijklmnopqrstuvwxyz0123456789 first.',
+    'bearer token': 'Send Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456',
+    'password or key assignment': 'Then export DB_PASSWORD=hunter2hunter2',
+  };
+  for (const [kind, fix] of Object.entries(samples)) {
+    assert.throws(() => tools.memory_remember.run({ lesson: { ...lesson, fix } }), error => error.message.includes(kind) && !error.message.includes(fix.split(' ').at(-1)));
+  }
+  assert.throws(() => tools.memory_remember.run({ lesson: { ...lesson, title: 'api_key: "abcd1234efgh5678"' } }), /credentials/u);
+  assert.equal(noteCount(root), 0);
+});
+
+test('secrets scan does not flag ordinary prose, placeholders or short values', t => {
+  const { ctx } = fixture(t), tools = createMemoryTools(ctx, { allowWrite: true });
+  const fixes = [
+    'Rotate the password every quarter and keep the token in the vault.',
+    'The token: expired, so request a new one.',
+    'Set password=$DB_PASSWORD from the environment.',
+    'Use max_tokens: 100000 for the long summaries.',
+    'Store the api_key = <your key here> in the keychain.',
+    'Run the sk-learn style skill check on AKIA documentation pages.',
+  ];
+  for (const fix of fixes) assert.equal(tools.memory_remember.run({ lesson: { ...lesson, fix } }).status, 'review_required', fix);
+});
+
+test('preview surfaces same-scope overlap and save_new reuses a near-duplicate', t => {
+  const { ctx, root } = fixture(t), tools = createMemoryTools(ctx, { allowWrite: true });
+  const a = tools.memory_remember.run({ lesson }); assert.equal(a.overlaps, undefined);
+  const first = tools.memory_remember.run({ review_id: a.review_id, decision: 'save_new' });
+  const reworded = { ...lesson, evidence: lesson.evidence + ' Checked.' };
+  const b = tools.memory_remember.run({ lesson: reworded });
+  assert.equal(b.overlaps[0].path, first.path); assert.ok(b.overlaps[0].overlap >= 0.9, JSON.stringify(b.overlaps));
+  const reused = tools.memory_remember.run({ review_id: b.review_id, decision: 'save_new' });
+  assert.equal(reused.status, 'reused'); assert.equal(reused.path, first.path); assert.equal(noteCount(root), 1);
+});
+
+test('overlap check keeps different scopes, changed versions and deliberate differences', t => {
+  const { ctx, root } = fixture(t), tools = createMemoryTools(ctx, { allowWrite: true });
+  const save = l => { const p = tools.memory_remember.run({ lesson: l }); return { p, r: tools.memory_remember.run({ review_id: p.review_id, decision: 'save_new' }) }; };
+  save({ ...lesson, fix: 'Use the documented Java 21 environment for the runner.' });
+  const other = tools.memory_remember.run({ lesson: { ...lesson, scope: 'other project / Java 21', fix: 'Use the documented Java 21 environment for the runner.' } });
+  assert.equal(other.overlaps, undefined);
+  assert.equal(tools.memory_remember.run({ review_id: other.review_id, decision: 'save_new' }).saved, true);
+  const version = tools.memory_remember.run({ lesson: { ...lesson, fix: 'Use the documented Java 17 environment for the runner.' } });
+  assert.equal(version.overlaps[0].same_numbers, false);
+  assert.equal(tools.memory_remember.run({ review_id: version.review_id, decision: 'save_new' }).saved, true);
+  assert.equal(noteCount(root), 3);
+  const same = tools.memory_remember.run({ lesson: { ...lesson, fix: 'Use the documented Java 21 environment for the runner.' } });
+  assert.equal(tools.memory_remember.run({ review_id: same.review_id, decision: 'save_difference', existing_path: same.overlaps[0].path }).saved, true);
+  assert.equal(noteCount(root), 4);
+});
