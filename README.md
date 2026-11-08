@@ -39,14 +39,14 @@ For example: an agent discovers that a local test runner needs a particular Java
 
 ## Get started
 
-You need **[Node.js 22+](https://nodejs.org/)** and **[Git](https://git-scm.com/downloads)**. The MCP server uses the official MCP SDK and Zod validation; no build step or API key is needed. Your chosen coding agents still need to be installed and signed in separately.
+You need **[Node.js 22+](https://nodejs.org/)**. The MCP server uses the official MCP SDK and Zod validation; no build step or API key is needed. Your chosen coding agents still need to be installed and signed in separately.
 
 ```sh
-npm install --global git+https://github.com/Ameer-Jamal/agent-memory.git
+npm install --global @ameer-jamal/agent-memory
 agent-memory ui
 ```
 
-The package is installed directly from this GitHub repo; an npm registry release is not required. Prefer to inspect the source first? [Run from a clone](docs/getting-started.md#run-from-source).
+Prefer to inspect the source first or install directly from GitHub? [Run from a clone](docs/getting-started.md#run-from-source).
 
 The graphical setup opens locally in your browser, with a native folder picker, agent checkboxes, a file-change preview, and separate configuration/read/write statuses. Prefer a terminal? Run `agent-memory setup`. No team knowledge or shared workspace service is involved.
 
@@ -255,7 +255,7 @@ This adds a small `AGENTS.md` pointer to your personal notebook. It does not cop
 ### Update an existing installation
 
 ```sh
-npm install --global git+https://github.com/Ameer-Jamal/agent-memory.git
+npm install --global @ameer-jamal/agent-memory
 agent-memory setup --upgrade-policy
 ```
 

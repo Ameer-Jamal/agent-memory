@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-11-07
 
 - Guided setup reuses the installed memory and optional notes folders as prompt defaults, so adding agents does not accidentally request a relocation. First-install defaults, explicit options and existing installer state remain compatible.
 

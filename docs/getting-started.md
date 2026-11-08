@@ -2,24 +2,26 @@
 
 ## Install
 
-Install [Node.js 22+](https://nodejs.org/) and [Git](https://git-scm.com/downloads), then:
+Install [Node.js 22+](https://nodejs.org/), then:
 
 ```sh
-npm install --global git+https://github.com/Ameer-Jamal/agent-memory.git
+npm install --global @ameer-jamal/agent-memory
 agent-memory ui
 ```
 
-This installs the package directly from GitHub. The package uses the official MCP SDK and Zod validation; there is no build step, API key, or hosted memory service to configure. Your selected agents need their own normal installation and login.
+This installs the published npm package. The package uses the official MCP SDK and Zod validation; there is no build step, API key, or hosted memory service to configure. Your selected agents need their own normal installation and login.
 
 The graphical setup includes folder selection, agent checkboxes, previews, and connection status. See [GUI guide](gui.md). For a terminal wizard, run `agent-memory setup`.
 
 Without a global installation:
 
 ```sh
-npx --yes --package=github:Ameer-Jamal/agent-memory agent-memory setup
+npx --yes --package=@ameer-jamal/agent-memory agent-memory setup
 ```
 
-Use that same `npx --yes --package=github:Ameer-Jamal/agent-memory agent-memory` prefix in place of `agent-memory` for later commands.
+Use that same `npx --yes --package=@ameer-jamal/agent-memory agent-memory` prefix in place of `agent-memory` for later commands.
+
+To install directly from the repository instead, install Git and run `npm install --global git+https://github.com/Ameer-Jamal/agent-memory.git`.
 
 ## Choose where knowledge lives
 
@@ -85,7 +87,7 @@ Your knowledge files are kept. The installer removes its own unchanged blocks an
 To update the CLI:
 
 ```sh
-npm install --global git+https://github.com/Ameer-Jamal/agent-memory.git
+npm install --global @ameer-jamal/agent-memory
 ```
 
 An installer update does not overwrite your existing memory policy. Review release notes before changing policy or reconnecting tools.
