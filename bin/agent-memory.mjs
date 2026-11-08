@@ -3,7 +3,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
-import { context, AGENTS, VERSION, detect, discoverObsidian, planSetup, install, planUninstall, uninstall, doctor, instructions, prepareTest, checkTest, cleanTest } from '../src/core.mjs';
+import { context, AGENTS, VERSION, load, detect, discoverObsidian, planSetup, install, planUninstall, uninstall, doctor, instructions, prepareTest, checkTest, cleanTest } from '../src/core.mjs';
 import { search, show, maintenance, previewMaintenance, applyMaintenance } from '../src/notebook.mjs';
 import { planProject, connectProject } from '../src/projects.mjs';
 import { verifyLive } from '../src/verification.mjs';
@@ -138,13 +138,14 @@ async function main() {
     if (cmd === 'setup') {
       const opts = options(flags);
       if (process.stdin.isTTY && !flags.json && !flags.yes && !flags['dry-run']) {
+        const previous = load(ctx);
         console.log('\n  Agent Memory\n  A shared notebook for your coding agents. Obsidian is optional.\n');
         const vaults = discoverObsidian(ctx);
         if (vaults.length) console.log('  Found Obsidian vaults (optional):\n' + vaults.map(v => `    ${v}`).join('\n') + '\n  Use a new subfolder inside a vault, or any ordinary folder.\n');
-        opts.memoryDir ||= await ask('Where should your memory live?', path.join(ctx.home, 'AgentMemory'));
+        opts.memoryDir ||= await ask('Where should your memory live?', previous?.memoryDir || path.join(ctx.home, 'AgentMemory'));
         opts.agents ||= (await ask('Which agents? Comma-separated names', detect(ctx).join(',') || AGENTS.join(','))).split(',').map(s => s.trim());
         if (opts.agents.includes('all')) opts.agents = AGENTS;
-        if (!opts.notesDir) opts.notesDir = await ask('Existing Markdown notes to search if memory has no answer? Leave blank to skip');
+        if (!opts.notesDir) opts.notesDir = await ask('Existing Markdown notes folder (optional)', previous?.notesDir || '');
         if (opts.agents.includes('claude') && !opts.allowCapture) opts.allowCapture = /^(y|yes)$/iu.test(await ask('Allow Claude to save Markdown files inside the memory inbox? (y/N)', 'n'));
       }
       const plan = planSetup(ctx, opts);

@@ -82,6 +82,8 @@ Search prefers titles, returns at most **8 hits**, and caps serialized output at
 
 Choose a **new subfolder** inside your vault, such as `My Vault/Agent Memory`. The installer suggests registered vaults when it can find them. All notes are ordinary Markdown, so they remain editable without Obsidian.
 
+Rerunning `agent-memory setup` defaults to your installed memory folder and optional notes folder. Press Enter to keep them when adding another agent. Each agent keeps its own instruction-file location and points to the same shared memory; the optional notes folder can live elsewhere. Existing installations need no migration.
+
 ### Prefer an explicit command?
 
 ```sh
